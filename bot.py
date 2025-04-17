@@ -4,8 +4,8 @@ import requests
 import datetime
 import os
 
-BOT_TOKEN = "7695122400:AAFwOeyfZ3ICpJ-w8M1fl8_4UEhZOGTPrms"
-CHANNEL_ID = 6146221712  # o tuo user se vuoi ricevere i messaggi in privato
+BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
+CHANNEL_ID = "6146221712"  # o tuo user se vuoi ricevere i messaggi in privato
 
 MIN_ODDS = 1.80
 MAX_ODDS = 10.00
