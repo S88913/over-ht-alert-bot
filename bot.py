@@ -56,3 +56,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+send_telegram_message("✅ TEST: Il bot è attivo e funzionante!")
