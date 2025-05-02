@@ -5,13 +5,17 @@ import time
 from datetime import datetime
 import pytz
 
-# === CONFIG ===
+# === CONFIGURAZIONE ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "-1002522593547"
+CHAT_ID = "-1002522593547"  # Canale Telegram
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     try:
         response = requests.post(url, data=data)
         print("✅ Inviato:", response.text)
@@ -36,7 +40,7 @@ def converti_orario_a_locale(orario_str):
         match_locale = match_utc.astimezone(italy)
         return match_locale.strftime("%H:%M")
     except Exception as e:
-        print("❌ Errore conversione locale:", e)
+        print("❌ Errore conversione orario:", e)
         return orario_str
 
 def leggi_partite_attive():
@@ -47,6 +51,8 @@ def leggi_partite_attive():
 
     with open("matches.csv", newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
+        next(reader)  # Salta la prima riga (intestazioni)
+
         for riga in reader:
             try:
                 nazione = riga[2]
@@ -64,7 +70,7 @@ def leggi_partite_attive():
     return partite
 
 def main():
-    print("🚀 Bot attivo – nazione sempre visibile")
+    print("🚀 Bot attivo – con orario e nazione corretti")
     partite = leggi_partite_attive()
     print(f"⏰ Partite attive trovate: {len(partite)}")
 
