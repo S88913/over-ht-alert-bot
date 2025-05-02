@@ -2,11 +2,13 @@ import csv
 import requests
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# === CONFIGURAZIONE ===
+# === CONFIG ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "-1002522593547"  # Canale: POTYPOTY OVER 0.5 HT
+CHAT_ID = "-1002522593547"  # Canale Telegram
+
+# === FUNZIONI ===
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -21,13 +23,16 @@ def send_telegram_message(message):
     except Exception as e:
         print("❌ Errore invio:", e)
 
-def partita_è_iniziata(orario_stringa):
+def partita_ora_inizio(orario_str):
     try:
-        orario_match = datetime.strptime(orario_stringa, "%b %d %Y - %I:%M%p")
-        adesso = datetime.now()
-        return adesso >= orario_match
+        # Esempio orario: "May 02 2025 - 5:30pm"
+        orario = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
+        ora_attuale = datetime.now()
+
+        # Confronta: invia solo se è entro ±3 minuti rispetto a ora
+        return abs((ora_attuale - orario).total_seconds()) <= 180
     except Exception as e:
-        print("❌ Errore conversione orario:", e)
+        print("❌ Errore orario:", e)
         return False
 
 def leggi_partite_attive():
@@ -43,22 +48,19 @@ def leggi_partite_attive():
                 home_team = riga[4]
                 away_team = riga[5]
                 orario = riga[1]
-                over05_ht = float(riga[12])  # colonna 13 (index 12)
+                over05_ht = float(riga[12])
 
-                if over05_ht >= 85 and partita_è_iniziata(orario):
+                if over05_ht >= 85 and partita_ora_inizio(orario):
                     partite.append((home_team, away_team, orario, over05_ht))
             except Exception as e:
-                print("❌ Errore su riga:", e)
+                print("❌ Riga saltata:", e)
                 continue
-
     return partite
 
 def main():
-    print("🚀 Bot attivo su Render – modalità PREMATCH filtrata per orario")
-    send_telegram_message("✅ Bot attivo – invierò solo *le partite che stanno per iniziare*")
-
+    print("🚀 Bot attivo – invia solo partite che stanno per iniziare (±3 minuti)")
     partite = leggi_partite_attive()
-    print(f"⏰ Partite in partenza: {len(partite)}")
+    print(f"⏰ Partite in orario adesso: {len(partite)}")
 
     for home, away, orario, over in partite:
         messaggio = (
