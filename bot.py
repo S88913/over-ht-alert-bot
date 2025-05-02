@@ -3,19 +3,15 @@ import requests
 import os
 import time
 from datetime import datetime
-import pytz  # Per gestione fusi orari
+import pytz
 
 # === CONFIG ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "-1002522593547"  # Canale: POTYPOTY OVER 0.5 HT
+CHAT_ID = "-1002522593547"
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         response = requests.post(url, data=data)
         print("✅ Inviato:", response.text)
@@ -24,12 +20,9 @@ def send_telegram_message(message):
 
 def partita_ora_inizio(orario_str):
     try:
-        # Converte l’orario del match da stringa UTC
         match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
         match_utc = pytz.utc.localize(match_utc)
         now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-
-        # Partita considerata “appena iniziata” se entro ±3 minuti
         return abs((now_utc - match_utc).total_seconds()) <= 180
     except Exception as e:
         print("❌ Errore orario:", e)
@@ -56,29 +49,30 @@ def leggi_partite_attive():
         reader = csv.reader(file)
         for riga in reader:
             try:
+                nazione = riga[2]
+                campionato = riga[3]
                 home_team = riga[4]
                 away_team = riga[5]
                 orario = riga[1]
-                campionato = riga[3]
-                over05_ht = float(riga[12])  # colonna 13
+                over05_ht = float(riga[12])
 
                 if over05_ht >= 85 and partita_ora_inizio(orario):
-                    partite.append((campionato, home_team, away_team, orario, over05_ht))
+                    partite.append((nazione, campionato, home_team, away_team, orario, over05_ht))
             except Exception as e:
                 print("❌ Riga saltata:", e)
                 continue
     return partite
 
 def main():
-    print("🚀 Bot attivo – invia solo partite appena iniziate")
+    print("🚀 Bot attivo – nazione sempre visibile")
     partite = leggi_partite_attive()
-    print(f"⏰ Partite valide trovate ora: {len(partite)}")
+    print(f"⏰ Partite attive trovate: {len(partite)}")
 
-    for campionato, home, away, orario, over in partite:
+    for nazione, campionato, home, away, orario, over in partite:
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
             f"⚠️ *PARTITA APPENA INIZIATA*\n"
-            f"🏆 {campionato}\n"
+            f"{nazione} – {campionato}\n"
             f"{home} vs {away}\n"
             f"🕒 Orario: {orario_locale}\n"
             f"🔥 Over 0.5 HT: *{over}%*"
