@@ -1,14 +1,19 @@
 import csv
 import requests
 import os
+import time
 
 # === CONFIGURAZIONE ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "-1002522593547"
+CHAT_ID = "-1002522593547"  # Canale privato: POTYPOTY OVER 0.5 HT
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
     try:
         response = requests.post(url, data=data)
         print("✅ Inviato:", response.text)
@@ -39,8 +44,8 @@ def leggi_partite_prematch():
     return partite_valide
 
 def main():
-    print("🚀 Bot attivo su Render – modalità PREMATCH (senza quota)")
-    send_telegram_message("✅ Il bot è attivo – controllo *PreMatch* in corso")
+    print("🚀 Bot attivo su Render – modalità PREMATCH")
+    send_telegram_message("✅ Il bot è attivo – *PreMatch mode* (canale pubblico)")
 
     partite = leggi_partite_prematch()
     print(f"📊 Partite trovate: {len(partite)}")
@@ -53,6 +58,7 @@ def main():
             f"🔥 Over 0.5 HT: *{over}%*"
         )
         send_telegram_message(messaggio)
+        time.sleep(1.5)  # ritardo per evitare blocco da Telegram
 
 if __name__ == "__main__":
     main()
