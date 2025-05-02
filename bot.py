@@ -1,12 +1,10 @@
 import csv
-import time
 import requests
-import datetime
 import os
 
 # === CONFIGURAZIONE ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "6146221712"  # Tuo ID Telegram personale
+CHAT_ID = "6146221712"
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -28,8 +26,7 @@ def leggi_partite_da_csv():
             for riga in reader:
                 try:
                     over = float(riga.get("Over 0.5 HT", "0").replace("%", "").strip())
-                    quota = float(riga.get("Quota", "0"))
-                    if 85 <= over <= 100 and 1.80 <= quota <= 10.00:
+                    if over >= 85:
                         partite.append(riga)
                 except:
                     continue
@@ -37,20 +34,22 @@ def leggi_partite_da_csv():
         print("❌ Errore lettura CSV:", e)
     return partite
 
-def main():
-    print("🚀 Bot avviato")
-    send_telegram_message("✅ Il bot è attivo su Render!")
+def invia_notifiche_prematch():
     partite = leggi_partite_da_csv()
-    print(f"📊 Partite trovate: {len(partite)}")
+    print(f"📊 Partite pre-match da notificare: {len(partite)}")
     for p in partite:
         msg = (
-            f"⚽ {p.get('Home Team')} vs {p.get('Away Team')}\n"
+            f"⚠️ *PARTITA DA MONITORARE LIVE*\n"
+            f"{p.get('Home Team')} vs {p.get('Away Team')}\n"
             f"🕒 Orario: {p.get('Time')}\n"
-            f"🔥 Over 0.5 HT: {p.get('Over 0.5 HT')}%\n"
-            f"💰 Quota: {p.get('Quota')}"
+            f"🔥 Over 0.5 HT: {p.get('Over 0.5 HT')}%"
         )
         send_telegram_message(msg)
-    time.sleep(3600)  # attende 1 ora prima del prossimo ciclo
+
+def main():
+    print("🚀 Bot attivo su Render")
+    send_telegram_message("✅ Il bot è attivo su Render – modalità *PreMatch*")
+    invia_notifiche_prematch()
 
 if __name__ == "__main__":
     main()
