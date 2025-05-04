@@ -5,9 +5,10 @@ import time
 from datetime import datetime
 import pytz
 
-# === CONFIGURAZIONE ===
+# === CONFIG ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-CHAT_ID = "-1002522593547"  # Canale Telegram
+CHAT_ID = "-1002522593547"
+FILE_NOTIFICATI = "notificati.txt"
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -39,24 +40,17 @@ def converti_orario_a_locale(orario_str):
         print("❌ Errore conversione orario:", e)
         return orario_str
 
-def calcola_media_over05_ht():
-    try:
-        with open("matches.csv", newline='', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)
-            valori = []
-            for riga in reader:
-                try:
-                    valore = float(riga[17])  # colonna Over05 FHG HT Average
-                    valori.append(valore)
-                except:
-                    continue
-            return sum(valori) / len(valori) if valori else 0
-    except Exception as e:
-        print("❌ Errore calcolo media:", e)
-        return 0
+def carica_notificati():
+    if not os.path.exists(FILE_NOTIFICATI):
+        return set()
+    with open(FILE_NOTIFICATI, "r") as f:
+        return set(line.strip() for line in f)
 
-def leggi_partite_attive(media_soglia):
+def salva_notificato(match_id):
+    with open(FILE_NOTIFICATI, "a") as f:
+        f.write(f"{match_id}\n")
+
+def leggi_partite_attive(notificati):
     partite = []
     if not os.path.exists("matches.csv"):
         print("⚠️ File matches.csv non trovato.")
@@ -75,31 +69,33 @@ def leggi_partite_attive(media_soglia):
                 orario = riga[1]
                 over05_ht = float(riga[17])
 
-                if over05_ht >= media_soglia and partita_ora_inizio(orario):
-                    partite.append((nazione, campionato, home_team, away_team, orario, over05_ht))
+                # Crea ID unico della partita
+                match_id = f"{home_team}_{away_team}_{orario}"
+
+                if over05_ht >= 85 and partita_ora_inizio(orario) and match_id not in notificati:
+                    partite.append((match_id, nazione, campionato, home_team, away_team, orario, over05_ht))
             except Exception as e:
                 print("❌ Riga saltata:", e)
                 continue
     return partite
 
 def main():
-    print("🚀 Bot attivo – filtraggio intelligente")
-    media = calcola_media_over05_ht()
-    print(f"📊 Media Over 0.5 HT calcolata: {round(media, 1)}%")
+    print("🚀 Bot attivo – con filtro 85% e blocco duplicati")
+    notificati = carica_notificati()
+    partite = leggi_partite_attive(notificati)
+    print(f"⏰ Partite valide da inviare: {len(partite)}")
 
-    partite = leggi_partite_attive(media)
-    print(f"⏰ Partite valide trovate: {len(partite)}")
-
-    for nazione, campionato, home, away, orario, over in partite:
+    for match_id, nazione, campionato, home, away, orario, over in partite:
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
             f"⚠️ *PARTITA APPENA INIZIATA*\n"
             f"{nazione} – {campionato}\n"
             f"{home} vs {away}\n"
             f"🕒 Orario: {orario_locale}\n"
-            f"🔥 Over 0.5 HT: *{round(over, 1)}%* (media {round(media, 1)}%)"
+            f"🔥 Over 0.5 HT: *{round(over, 1)}%*"
         )
         send_telegram_message(messaggio)
+        salva_notificato(match_id)
         time.sleep(1.5)
 
 if __name__ == "__main__":
