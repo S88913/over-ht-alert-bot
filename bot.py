@@ -58,7 +58,7 @@ def leggi_partite_attive(notificati):
 
     with open("matches.csv", newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
-        next(reader)
+        next(reader)  # Salta intestazione
 
         for riga in reader:
             try:
@@ -68,6 +68,10 @@ def leggi_partite_attive(notificati):
                 away_team = riga[5]
                 orario = riga[1]
                 over05_ht = float(riga[17])
+
+                # Ignora eSports
+                if "esport" in campionato.lower():
+                    continue
 
                 # Crea ID unico della partita
                 match_id = f"{home_team}_{away_team}_{orario}"
@@ -80,7 +84,7 @@ def leggi_partite_attive(notificati):
     return partite
 
 def main():
-    print("🚀 Bot attivo – con filtro 85% e blocco duplicati")
+    print("🚀 Bot attivo – solo calcio, min 85%, no duplicati")
     notificati = carica_notificati()
     partite = leggi_partite_attive(notificati)
     print(f"⏰ Partite valide da inviare: {len(partite)}")
