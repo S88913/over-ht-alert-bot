@@ -6,14 +6,14 @@ from datetime import datetime
 FOOTYSTATS_API_KEY = "972183dce49bfd4d567da3d61e8ab389b2e04334728101dcc4ba28f9d4f4d19e"
 TELEGRAM_CHAT_ID = 6146221712
 TELEGRAM_BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-OVER_05_HT_THRESHOLD = 85  # Soglia percentuale
+OVER_05_HT_THRESHOLD = 85  # soglia minima per considerare una partita
 
 # === AVVIO TELEGRAM ===
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
 def invia_messaggio(msg):
     try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode=telegram.ParseMode.MARKDOWN)
     except Exception as e:
         print("Errore invio messaggio Telegram:", e)
 
@@ -21,7 +21,8 @@ def ottieni_partite_oggi():
     url = "https://api.footystats.org/api/v1/fixtures"
     params = {
         "key": FOOTYSTATS_API_KEY,
-        "date": datetime.today().strftime('%Y-%m-%d')
+        "date": datetime.today().strftime('%Y-%m-%d'),
+        "timezone": "Europe/Rome"
     }
     try:
         response = requests.get(url, params=params)
@@ -39,8 +40,7 @@ def filtra_partite_valide(partite):
             probabilita = float(partita.get("ht_over05", 0) or 0)
             if probabilita >= OVER_05_HT_THRESHOLD:
                 partite_valide.append(partita)
-        except Exception as e:
-            print("Errore nel parsing partita:", e)
+        except Exception:
             continue
     return partite_valide
 
