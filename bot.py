@@ -50,15 +50,18 @@ def salva_notificato(match_id):
     with open(FILE_NOTIFICATI, "a") as f:
         f.write(f"{match_id}\n")
 
-def leggi_partite_attive(notificati):
-    partite = []
+def leggi_partite(notificati):
+    partite_05ht = []
+    partite_bonus_singole = []
+    partite_bonus_multipla = []
+
     if not os.path.exists("matches.csv"):
         print("⚠️ File matches.csv non trovato.")
-        return partite
+        return [], [], []
 
     with open("matches.csv", newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
-        next(reader)  # Salta intestazione
+        next(reader)
 
         for riga in reader:
             try:
@@ -67,29 +70,36 @@ def leggi_partite_attive(notificati):
                 home_team = riga[4]
                 away_team = riga[5]
                 orario = riga[1]
-                over05_ht = float(riga[17])
+                over05ht = float(riga[17])
+                btts = float(riga[14])
+                over25 = float(riga[15])
 
-                # Ignora eSports
-                if "esport" in campionato.lower():
-                    continue
-
-                # Crea ID unico della partita
                 match_id = f"{home_team}_{away_team}_{orario}"
 
-                if over05_ht >= 85 and partita_ora_inizio(orario) and match_id not in notificati:
-                    partite.append((match_id, nazione, campionato, home_team, away_team, orario, over05_ht))
+                if partita_ora_inizio(orario) and match_id not in notificati:
+                    if over05ht >= 85:
+                        partite_05ht.append((match_id, nazione, campionato, home_team, away_team, orario, over05ht))
+
+                    if over25 >= 70 or btts >= 75:
+                        partite_bonus_singole.append((match_id, nazione, campionato, home_team, away_team, orario, over25, btts))
+
+                    if over05ht >= 85 and over25 >= 70 and btts >= 75:
+                        partite_bonus_multipla.append((match_id, nazione, campionato, home_team, away_team, orario, over05ht, over25, btts))
+
             except Exception as e:
                 print("❌ Riga saltata:", e)
                 continue
-    return partite
+
+    return partite_05ht, partite_bonus_singole, partite_bonus_multipla
 
 def main():
-    print("🚀 Bot attivo – solo calcio, min 85%, no duplicati")
+    print("🚀 Bot prematch – attivo con Strategia Base + Bonus")
     notificati = carica_notificati()
-    partite = leggi_partite_attive(notificati)
-    print(f"⏰ Partite valide da inviare: {len(partite)}")
+    partite_05ht, bonus_singole, bonus_multipla = leggi_partite(notificati)
 
-    for match_id, nazione, campionato, home, away, orario, over in partite:
+    # Invio Over 0.5 HT
+    for match in partite_05ht:
+        match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
             f"⚠️ *PARTITA APPENA INIZIATA*\n"
@@ -101,6 +111,34 @@ def main():
         send_telegram_message(messaggio)
         salva_notificato(match_id)
         time.sleep(1.5)
+
+    # Invio strategia BONUS – Singole
+    for match in bonus_singole:
+        match_id, nazione, campionato, home, away, orario, over25, btts = match
+        orario_locale = converti_orario_a_locale(orario)
+        messaggio = (
+            f"⭐ *BONUS ALTA QUOTA – Singola da valutare*\n"
+            f"{nazione} – {campionato}\n"
+            f"{home} vs {away}\n"
+            f"🕒 Orario: {orario_locale}\n"
+            f"📈 Over 2.5: *{round(over25,1)}%* – BTTS: *{round(btts,1)}%*"
+        )
+        send_telegram_message(messaggio)
+        salva_notificato(match_id)
+        time.sleep(1.5)
+
+    # Invio strategia BONUS – Multipla
+    if bonus_multipla:
+        messaggio_multi = "*🎯 MULTIPLA BONUS GIORNALIERA*\nConsigliata per valore e % elevate:\n"
+        for match in bonus_multipla[:3]:  # max 3 partite
+            match_id, nazione, campionato, home, away, orario, over05, over25, btts = match
+            orario_locale = converti_orario_a_locale(orario)
+            messaggio_multi += (
+                f"\n▫️ {home} vs {away} – {nazione} ({campionato})\n"
+                f"🕒 {orario_locale} | 0.5HT: *{round(over05,1)}%* – O2.5: *{round(over25,1)}%* – BTTS: *{round(btts,1)}%*\n"
+            )
+            salva_notificato(match_id)
+        send_telegram_message(messaggio_multi)
 
 if __name__ == "__main__":
     main()
