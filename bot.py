@@ -1,76 +1,102 @@
+import csv
 import requests
-import telegram
+import os
+import time
 from datetime import datetime
+import pytz
 
 # === CONFIG ===
-FOOTYSTATS_API_KEY = "972183dce49bfd4d567da3d61e8ab389b2e04334728101dcc4ba28f9d4f4d19e"
-TELEGRAM_CHAT_ID = 6146221712
-TELEGRAM_BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
-OVER_05_HT_THRESHOLD = 85  # soglia minima per considerare una partita
+BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
+CHAT_ID = "6146221712"
+FILE_NOTIFICATI = "notificati.txt"
 
-# === AVVIO TELEGRAM ===
-bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
-
-def invia_messaggio(msg):
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode=telegram.ParseMode.MARKDOWN)
+        response = requests.post(url, data=data)
+        print("✅ Inviato:", response.text)
     except Exception as e:
-        print("Errore invio messaggio Telegram:", e)
+        print("❌ Errore invio:", e)
 
-def ottieni_partite_oggi():
-    url = "https://api.footystats.org/api/v1/fixtures"
-    params = {
-        "key": FOOTYSTATS_API_KEY,
-        "date": datetime.today().strftime('%Y-%m-%d'),
-        "timezone": "Europe/Rome"
-    }
+def partita_ora_inizio(orario_str):
     try:
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("data", [])
+        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
+        match_utc = pytz.utc.localize(match_utc)
+        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+        return abs((now_utc - match_utc).total_seconds()) <= 180
     except Exception as e:
-        print("Errore durante la richiesta API FootyStats:", e)
-        return []
+        print("❌ Errore orario:", e)
+        return False
 
-def filtra_partite_valide(partite):
-    partite_valide = []
-    for partita in partite:
-        try:
-            probabilita = float(partita.get("ht_over05", 0) or 0)
-            if probabilita >= OVER_05_HT_THRESHOLD:
-                partite_valide.append(partita)
-        except Exception:
-            continue
-    return partite_valide
+def converti_orario_a_locale(orario_str):
+    try:
+        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
+        match_utc = pytz.utc.localize(match_utc)
+        italy = pytz.timezone("Europe/Rome")
+        match_locale = match_utc.astimezone(italy)
+        return match_locale.strftime("%H:%M")
+    except Exception as e:
+        print("❌ Errore conversione orario:", e)
+        return orario_str
 
-def invia_notifiche():
-    print("✅ SCRIPT AVVIATO – controllo partite prematch")
-    partite = ottieni_partite_oggi()
-    if not partite:
-        print("⚠️ Nessuna partita trovata.")
-        return
+def carica_notificati():
+    if not os.path.exists(FILE_NOTIFICATI):
+        return set()
+    with open(FILE_NOTIFICATI, "r") as f:
+        return set(line.strip() for line in f)
 
-    partite_valide = filtra_partite_valide(partite)
-    if not partite_valide:
-        print(f"⚠️ Nessuna partita supera la soglia del {OVER_05_HT_THRESHOLD}%")
-        return
+def salva_notificato(match_id):
+    with open(FILE_NOTIFICATI, "a") as f:
+        f.write(f"{match_id}\n")
 
-    for p in partite_valide:
-        home = p.get("home_name", "")
-        away = p.get("away_name", "")
-        start_time = p.get("time", "")
-        league = p.get("league_name", "")
-        percentuale = p.get("ht_over05", "0")
+def leggi_partite_attive(notificati):
+    partite = []
+    if not os.path.exists("matches.csv"):
+        print("⚠️ File matches.csv non trovato.")
+        return partite
 
+    with open("matches.csv", newline='', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        next(reader)
+
+        for riga in reader:
+            try:
+                nazione = riga[2]
+                campionato = riga[3]
+                home_team = riga[4]
+                away_team = riga[5]
+                orario = riga[1]
+                over05_ht = float(riga[17])
+
+                # Crea ID unico della partita
+                match_id = f"{home_team}_{away_team}_{orario}"
+
+                if over05_ht >= 85 and partita_ora_inizio(orario) and match_id not in notificati:
+                    partite.append((match_id, nazione, campionato, home_team, away_team, orario, over05_ht))
+            except Exception as e:
+                print("❌ Riga saltata:", e)
+                continue
+    return partite
+
+def main():
+    print("🚀 Bot attivo – con filtro 85% e blocco duplicati")
+    notificati = carica_notificati()
+    partite = leggi_partite_attive(notificati)
+    print(f"⏰ Partite valide da inviare: {len(partite)}")
+
+    for match_id, nazione, campionato, home, away, orario, over in partite:
+        orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"⚽ *PARTITA CONSIGLIATA – OVER 0.5 HT*\n"
-            f"🏆 {league}\n"
-            f"🕒 {start_time}\n"
-            f"📊 Percentuale: *{percentuale}%*\n"
-            f"📌 {home} vs {away}"
+            f"⚠️ *PARTITA APPENA INIZIATA*\n"
+            f"{nazione} – {campionato}\n"
+            f"{home} vs {away}\n"
+            f"🕒 Orario: {orario_locale}\n"
+            f"🔥 Over 0.5 HT: *{round(over, 1)}%*"
         )
-        invia_messaggio(messaggio)
+        send_telegram_message(messaggio)
+        salva_notificato(match_id)
+        time.sleep(1.5)
 
 if __name__ == "__main__":
-    invia_notifiche()
+    main()
