@@ -36,4 +36,41 @@ def filtra_partite_valide(partite):
     partite_valide = []
     for partita in partite:
         try:
-            probabilita = f
+            probabilita = float(partita.get("ht_over05", 0) or 0)
+            if probabilita >= OVER_05_HT_THRESHOLD:
+                partite_valide.append(partita)
+        except Exception as e:
+            print("Errore nel parsing partita:", e)
+            continue
+    return partite_valide
+
+def invia_notifiche():
+    print("✅ SCRIPT AVVIATO – controllo partite prematch")
+    partite = ottieni_partite_oggi()
+    if not partite:
+        print("⚠️ Nessuna partita trovata.")
+        return
+
+    partite_valide = filtra_partite_valide(partite)
+    if not partite_valide:
+        print(f"⚠️ Nessuna partita supera la soglia del {OVER_05_HT_THRESHOLD}%")
+        return
+
+    for p in partite_valide:
+        home = p.get("home_name", "")
+        away = p.get("away_name", "")
+        start_time = p.get("time", "")
+        league = p.get("league_name", "")
+        percentuale = p.get("ht_over05", "0")
+
+        messaggio = (
+            f"⚽ *PARTITA CONSIGLIATA – OVER 0.5 HT*\n"
+            f"🏆 {league}\n"
+            f"🕒 {start_time}\n"
+            f"📊 Percentuale: *{percentuale}%*\n"
+            f"📌 {home} vs {away}"
+        )
+        invia_messaggio(messaggio)
+
+if __name__ == "__main__":
+    invia_notifiche()
