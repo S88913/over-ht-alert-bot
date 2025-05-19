@@ -1,6 +1,5 @@
 import requests
 import telegram
-import time
 from datetime import datetime
 
 # === CONFIG ===
@@ -19,7 +18,7 @@ def invia_messaggio(msg):
         print("Errore invio messaggio Telegram:", e)
 
 def ottieni_partite_oggi():
-    url = "https://api.footystats.org/prematch"  # endpoint corretto per prematch
+    url = "https://api.footystats.org/prematch"
     params = {
         "key": FOOTYSTATS_API_KEY,
         "timezone": "Europe/Rome",
@@ -65,14 +64,10 @@ def invia_notifiche():
         percentuale = p.get("ht_over05", "0")
 
         messaggio = (
-            f"⚽ *PARTITA CONSIGLIATA – OVER 0.5 HT*
-"
-            f"🏆 {league}
-"
-            f"🕒 {start_time}
-"
-            f"📊 Percentuale: *{percentuale}%*
-"
+            f"⚽ *PARTITA CONSIGLIATA – OVER 0.5 HT*\n"
+            f"🏆 {league}\n"
+            f"🕒 {start_time}\n"
+            f"📊 Percentuale: *{percentuale}%*\n"
             f"📌 {home} vs {away}"
         )
         invia_messaggio(messaggio)
