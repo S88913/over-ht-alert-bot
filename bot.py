@@ -2,7 +2,7 @@ import csv
 import requests
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # === CONFIG ===
@@ -19,13 +19,17 @@ def send_telegram_message(message):
     except Exception as e:
         print("❌ Errore invio:", e)
 
-def partita_ora_inizio(orario_str, minuti_offset=0):
+def partita_ora_inizio(orario_str, minuti_offset=10):
+    """
+    Controlla se la partita inizia tra 10 minuti e 1 minuto da ora.
+    """
     try:
         match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
         match_utc = pytz.utc.localize(match_utc)
         now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
         delta = (match_utc - now_utc).total_seconds()
-        return -60 * minuti_offset <= delta <= 60  # tra -offset e +1 minuto
+        # True se delta tra 60 e minuti_offset*60 secondi (cioè tra 1 e 10 minuti)
+        return 60 <= delta <= 60 * minuti_offset
     except Exception as e:
         print("❌ Errore orario:", e)
         return False
@@ -80,16 +84,16 @@ def leggi_partite(notificati):
                 if match_id in notificati:
                     continue
 
-                # Over 0.5 HT - al fischio d'inizio
-                if partita_ora_inizio(orario) and over05ht >= 85:
+                # Over 0.5 HT - NOTIFICA prematch 10 minuti prima
+                if partita_ora_inizio(orario, minuti_offset=10) and over05ht >= 85:
                     partite_05ht.append((match_id, nazione, campionato, home_team, away_team, orario, over05ht))
 
-                # Over 2.5 – solo 5 min prima del calcio d’inizio
+                # Over 2.5 – NOTIFICA 5 minuti prima
                 elif partita_ora_inizio(orario, minuti_offset=5) and (over25 >= 70 or btts >= 75):
                     partite_over25.append((match_id, nazione, campionato, home_team, away_team, orario, over25, btts))
 
-                # Multipla: tutti e tre sopra soglia
-                if over05ht >= 85 and over25 >= 70 and btts >= 75 and partita_ora_inizio(orario, minuti_offset=5):
+                # Multipla: tutti e tre sopra soglia 10 minuti prima
+                if over05ht >= 85 and over25 >= 70 and btts >= 75 and partita_ora_inizio(orario, minuti_offset=10):
                     partite_bonus_multipla.append((match_id, nazione, campionato, home_team, away_team, orario, over05ht, over25, btts))
 
             except Exception as e:
@@ -108,7 +112,7 @@ def main():
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"⚠️ *PARTITA APPENA INIZIATA*\n"
+            f"⚠️ *PARTITA TRA POCO*\n"
             f"{nazione} – {campionato}\n"
             f"{home} vs {away}\n"
             f"🕒 Orario: {orario_locale}\n"
