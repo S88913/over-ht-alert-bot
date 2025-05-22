@@ -124,15 +124,11 @@ def main():
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"⚡️ *OVER 0.5 PRIMO TEMPO*
-"
-            f"🌍 {nazione} | {campionato}
-"
-            f"⚽ {home} vs {away}
-"
-            f"🕒 Ore: *{orario_locale}*
-"
-            f"📊 Over 0.5 HT: *{round(over, 1)}%*"
+            f"⚡️ *OVER 0.5 PRIMO TEMPO*\n"
+            f"🌍 {nazione} | {campionato}\n"
+            f"⚽ {home} vs {away}\n"
+            f"🕒 Ore: *{orario_locale}*\n"
+            f"📊 Over 0.5 HT: *{round(over, 1)}%*\n"
         )
         send_telegram_message(messaggio)
         salva_notificato(match_id)
@@ -142,32 +138,24 @@ def main():
         match_id, nazione, campionato, home, away, orario, over25, btts = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"🔥 *SEGNALAZIONE OVER 2.5*
-"
-            f"🌍 {nazione} | {campionato}
-"
-            f"⚽ {home} vs {away}
-"
-            f"🕒 Ore: *{orario_locale}*
-"
-            f"📈 O2.5: *{round(over25,1)}%* | BTTS: *{round(btts,1)}%*"
+            f"🔥 *SEGNALAZIONE OVER 2.5*\n"
+            f"🌍 {nazione} | {campionato}\n"
+            f"⚽ {home} vs {away}\n"
+            f"🕒 Ore: *{orario_locale}*\n"
+            f"📈 O2.5: *{round(over25,1)}%* | BTTS: *{round(btts,1)}%*\n"
         )
         send_telegram_message(messaggio)
         salva_notificato(match_id)
         time.sleep(1.5)
 
     if partite_multipla:
-        messaggio_multi = "💎 *MULTIPLA DEL GIORNO*
-Tre partite ad alto valore:
-"
+        messaggio_multi = "💎 *MULTIPLA DEL GIORNO*\nTre partite ad alto valore:\n"
         for match in partite_multipla[:3]:
             match_id, nazione, campionato, home, away, orario, over05, over25, btts = match
             orario_locale = converti_orario_a_locale(orario)
             messaggio_multi += (
-                f"\n🔹 *{home} vs {away}* ({nazione} - {campionato})
-"
-                f"🕒 {orario_locale} | 0.5HT: *{round(over05,1)}%*, O2.5: *{round(over25,1)}%*, BTTS: *{round(btts,1)}%*
-"
+                f"\n🔹 *{home} vs {away}* ({nazione} - {campionato})\n"
+                f"🕒 {orario_locale} | 0.5HT: *{round(over05,1)}%*, O2.5: *{round(over25,1)}%*, BTTS: *{round(btts,1)}%*\n"
             )
             salva_notificato(match_id)
         send_telegram_message(messaggio_multi)
