@@ -12,7 +12,6 @@ FILE_NOTIFICATI = "notificati.txt"
 CSV_FILE = "matches.csv"
 
 def send_telegram_message(message):
-    """Invia un messaggio su Telegram."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
@@ -23,7 +22,6 @@ def send_telegram_message(message):
         print("❌ Errore invio:", e)
 
 def partita_ora_inizio(orario_str, minuti_offset=10):
-    """Controlla se la partita inizia tra 1 e `minuti_offset` minuti da ora."""
     try:
         match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
         match_utc = pytz.utc.localize(match_utc)
@@ -35,7 +33,6 @@ def partita_ora_inizio(orario_str, minuti_offset=10):
         return False
 
 def converti_orario_a_locale(orario_str):
-    """Converte un orario UTC al fuso orario di Roma."""
     try:
         match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
         match_utc = pytz.utc.localize(match_utc)
@@ -46,19 +43,16 @@ def converti_orario_a_locale(orario_str):
         return orario_str
 
 def carica_notificati():
-    """Carica gli ID delle partite già notificate."""
     if not os.path.exists(FILE_NOTIFICATI):
         return set()
     with open(FILE_NOTIFICATI, "r") as f:
         return set(line.strip() for line in f if line.strip())
 
 def salva_notificato(match_id):
-    """Salva l'ID di una partita già notificata."""
     with open(FILE_NOTIFICATI, "a") as f:
         f.write(f"{match_id}\n")
 
 def leggi_partite(notificati):
-    """Legge e filtra le partite dal file CSV."""
     partite_05ht = []
     partite_over25 = []
     partite_multipla = []
@@ -86,13 +80,13 @@ def leggi_partite(notificati):
                 if match_id in notificati:
                     continue
 
-                if partita_ora_inizio(orario, minuti_offset=10) and over05ht >= 85:
+                if partita_ora_inizio(orario, 10) and over05ht >= 85:
                     partite_05ht.append((match_id, nazione, campionato, home, away, orario, over05ht))
 
-                if partita_ora_inizio(orario, minuti_offset=5) and (over25 >= 70 or btts >= 75):
+                if partita_ora_inizio(orario, 5) and over25 >= 80:
                     partite_over25.append((match_id, nazione, campionato, home, away, orario, over25, btts))
 
-                if partita_ora_inizio(orario, minuti_offset=10) and over05ht >= 85 and over25 >= 70 and btts >= 75:
+                if partita_ora_inizio(orario, 10) and over05ht >= 85 and over25 >= 80 and btts >= 75:
                     partite_multipla.append((match_id, nazione, campionato, home, away, orario, over05ht, over25, btts))
 
             except Exception as e:
@@ -110,10 +104,11 @@ def main():
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"⚠️ *PARTITA TRA POCO*\n"
-            f"{nazione} – {campionato}\n"
-            f"{home} vs {away}\n"
-            f"🕒 {orario_locale} | Over 0.5 HT: *{round(over, 1)}%*"
+            f"⚠️ *OVER 0.5 PRIMO TEMPO*\n"
+            f"🌍 {nazione} | {campionato}\n"
+            f"⚽ {home} vs {away}\n"
+            f"🕒 Ore: *{orario_locale}* (ora italiana)\n"
+            f"📊 Over 0.5 HT: *{round(over, 1)}%*"
         )
         send_telegram_message(messaggio)
         salva_notificato(match_id)
@@ -123,23 +118,24 @@ def main():
         match_id, nazione, campionato, home, away, orario, over25, btts = match
         orario_locale = converti_orario_a_locale(orario)
         messaggio = (
-            f"💣 *SEGNALAZIONE OVER 2.5*\n"
-            f"{nazione} – {campionato}\n"
-            f"{home} vs {away}\n"
-            f"🕒 {orario_locale} | O2.5: *{round(over25,1)}%* – BTTS: *{round(btts,1)}%*"
+            f"🔥 *SEGNALAZIONE OVER 2.5*\n"
+            f"🌍 {nazione} | {campionato}\n"
+            f"⚽ {home} vs {away}\n"
+            f"🕒 Ore: *{orario_locale}*\n"
+            f"📈 O2.5: *{round(over25,1)}%* | BTTS: *{round(btts,1)}%*"
         )
         send_telegram_message(messaggio)
         salva_notificato(match_id)
         time.sleep(1.5)
 
     if partite_multipla:
-        messaggio_multi = "*🎯 MULTIPLA BONUS GIORNALIERA*\nConsigliata per valore e % elevate:\n"
-        for match in partite_multipla[:3]:
+        messaggio_multi = "💎 *MULTIPLA DEL GIORNO*\nTre partite ad alto valore:\n"
+        for match in partite_multipla[:3]:  # max 3 partite consigliate
             match_id, nazione, campionato, home, away, orario, over05, over25, btts = match
             orario_locale = converti_orario_a_locale(orario)
             messaggio_multi += (
-                f"\n▫️ {home} vs {away} – {nazione} ({campionato})\n"
-                f"🕒 {orario_locale} | 0.5HT: *{round(over05,1)}%* – O2.5: *{round(over25,1)}%* – BTTS: *{round(btts,1)}%*\n"
+                f"\n🔹 *{home} vs {away}* ({nazione} - {campionato})\n"
+                f"🕒 {orario_locale} | 0.5HT: *{round(over05,1)}%*, O2.5: *{round(over25,1)}%*, BTTS: *{round(btts,1)}%*\n"
             )
             salva_notificato(match_id)
         send_telegram_message(messaggio_multi)
