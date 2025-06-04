@@ -10,20 +10,50 @@ BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
 CHAT_ID = "6146221712"
 FILE_NOTIFICATI = "notificati.txt"
 CSV_FILE = "matches.csv"
-FILE_INVIATO = "file_inviato.txt"
-CSV_OUTPUT = "over25_today.csv"
-
-def send_telegram_document(file_path, caption=""):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
-    with open(file_path, 'rb') as file:
-        data = {"chat_id": CHAT_ID, "caption": caption}
-        files = {"document": file}
-        requests.post(url, data=data, files=files)
+FILE_SENT_OVER25 = "over25_sent.txt"   # Serve per inviare solo una volta il file
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    requests.post(url, data=data)
+    try:
+        response = requests.post(url, data=data)
+        response.raise_for_status()
+        print("✅ Inviato:", message.splitlines()[0])
+    except Exception as e:
+        print("❌ Errore invio:", e)
+
+def send_telegram_file(filepath, caption=""):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    with open(filepath, "rb") as f:
+        files = {"document": f}
+        data = {"chat_id": CHAT_ID, "caption": caption}
+        try:
+            response = requests.post(url, files=files, data=data)
+            response.raise_for_status()
+            print(f"✅ File inviato: {filepath}")
+        except Exception as e:
+            print("❌ Errore invio file:", e)
+
+def partita_appena_iniziata(orario_str):
+    try:
+        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
+        match_utc = pytz.utc.localize(match_utc)
+        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+        delta = abs((match_utc - now_utc).total_seconds())
+        return delta <= 90  # entro 90 secondi dal fischio d'inizio
+    except Exception as e:
+        print("❌ Errore parsing orario:", e)
+        return False
+
+def partita_tra_oggi(orario_str):
+    try:
+        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
+        match_utc = pytz.utc.localize(match_utc)
+        today_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
+        return match_utc.date() == today_utc.date()
+    except Exception as e:
+        print("❌ Errore parsing orario (tra_oggi):", e)
+        return False
 
 def converti_orario_a_locale(orario_str):
     try:
@@ -32,17 +62,8 @@ def converti_orario_a_locale(orario_str):
         match_locale = match_utc.astimezone(pytz.timezone("Europe/Rome"))
         return match_locale.strftime("%H:%M")
     except Exception as e:
+        print("❌ Errore conversione orario:", e)
         return orario_str
-
-def partita_appena_iniziata(orario_str):
-    try:
-        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
-        match_utc = pytz.utc.localize(match_utc)
-        now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-        delta = abs((match_utc - now_utc).total_seconds())
-        return delta <= 90
-    except Exception as e:
-        return False
 
 def carica_notificati():
     if not os.path.exists(FILE_NOTIFICATI):
@@ -54,18 +75,18 @@ def salva_notificato(match_id):
     with open(FILE_NOTIFICATI, "a") as f:
         f.write(f"{match_id}\n")
 
-def file_gia_inviato():
-    oggi = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
-    if os.path.exists(FILE_INVIATO):
-        with open(FILE_INVIATO, "r") as f:
-            data = f.read().strip()
-        return data == oggi
-    return False
+def over25_file_sent_today():
+    today = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
+    if not os.path.exists(FILE_SENT_OVER25):
+        return False
+    with open(FILE_SENT_OVER25, "r") as f:
+        last_sent = f.read().strip()
+        return last_sent == today
 
-def segna_file_inviato():
-    oggi = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
-    with open(FILE_INVIATO, "w") as f:
-        f.write(oggi)
+def set_over25_file_sent():
+    today = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
+    with open(FILE_SENT_OVER25, "w") as f:
+        f.write(today)
 
 def leggi_partite(notificati):
     partite_05ht = []
@@ -77,7 +98,7 @@ def leggi_partite(notificati):
 
     with open(CSV_FILE, newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
-        header = next(reader, None)
+        next(reader, None)
         for riga in reader:
             try:
                 nazione = riga[2]
@@ -93,33 +114,49 @@ def leggi_partite(notificati):
                     continue
                 base_id = f"{home}_{away}_{orario}"
                 id_05ht = f"{base_id}-over05ht"
-                id_over25 = f"{base_id}-over25"
                 if partita_appena_iniziata(orario) and over05ht >= 85 and id_05ht not in notificati:
                     partite_05ht.append((id_05ht, nazione, campionato, home, away, orario, over05ht))
-                if over25 >= 85:
-                    partite_over25.append((id_over25, nazione, campionato, home, away, orario, over25, btts))
+                # Solo match di oggi per il file over 2.5
+                if partita_tra_oggi(orario) and over25 >= 85:
+                    partite_over25.append((nazione, campionato, home, away, orario, over25, btts))
             except Exception as e:
+                print("❌ Riga saltata:", e)
                 continue
     return partite_05ht, partite_over25
 
-def crea_csv_over25(partite_over25):
-    today_str = datetime.now(pytz.timezone("Europe/Rome")).strftime("%d/%m/%Y")
-    file_path = CSV_OUTPUT
-    with open(file_path, "w", encoding="utf-8", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["Data", "Orario", "Nazione", "Campionato", "Home", "Away", "O2.5 %", "BTTS %"])
+def scrivi_txt_over25(partite_over25, filename="over25_prematch.txt"):
+    righe = []
+    today = datetime.now(pytz.timezone("Europe/Rome")).strftime("%d/%m/%Y")
+    righe.append(f"OVER 2.5 PREMATCH DEL GIORNO (≥85%) - {today}")
+    righe.append("-" * 40)
+    if not partite_over25:
+        righe.append("Nessun match trovato.")
+    else:
         for match in partite_over25:
-            _, nazione, campionato, home, away, orario, over25, btts = match
-            orario_locale = converti_orario_a_locale(orario)
-            writer.writerow([today_str, orario_locale, nazione, campionato, home, away, round(over25,1), round(btts,1)])
-    return file_path
+            nazione, campionato, home, away, orario, over25, btts = match
+            ora = converti_orario_a_locale(orario)
+            righe.append(
+                f"{ora} | {nazione} | {campionato}\n"
+                f"{home} vs {away} | O2.5: {round(over25,1)}% | BTTS: {round(btts,1)}%\n"
+            )
+            righe.append("-" * 40)
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("\n".join(righe))
+    return filename
 
 def main():
     print("🚀 Bot prematch attivo...")
     notificati = carica_notificati()
     partite_05ht, partite_over25 = leggi_partite(notificati)
 
-    # Notifiche live solo Over 0.5 HT
+    # INVIARE FILE SOLO UNA VOLTA AL GIORNO
+    if not over25_file_sent_today():
+        filename = scrivi_txt_over25(partite_over25)
+        send_telegram_file(filename, caption="📄 Over 2.5 prematch del giorno (≥85%) – APRI IL FILE")
+        set_over25_file_sent()
+        os.remove(filename)  # elimina il file locale dopo invio
+
+    # Notifiche over 0.5 HT come sempre
     for match in partite_05ht:
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
@@ -133,14 +170,6 @@ def main():
         send_telegram_message(messaggio)
         salva_notificato(match_id)
         time.sleep(1.5)
-
-    # Invio file SOLO se non è stato inviato oggi
-    if not file_gia_inviato() and partite_over25:
-        file_path = crea_csv_over25(partite_over25)
-        send_telegram_document(file_path, caption="📄 Over 2.5 prematch del giorno (≥85%) – APRI CON GOOGLE SHEETS")
-        segna_file_inviato()
-    else:
-        print("❗️File già inviato oggi o nessun match over2.5 trovato.")
 
 if __name__ == "__main__":
     main()
