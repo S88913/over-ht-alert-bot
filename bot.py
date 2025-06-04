@@ -4,13 +4,14 @@ import os
 import time
 from datetime import datetime
 import pytz
+import hashlib
 
 # === CONFIG ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
 CHAT_ID = "6146221712"
 FILE_NOTIFICATI = "notificati.txt"
 CSV_FILE = "matches.csv"
-FILE_SENT_OVER25 = "over25_sent.txt"   # Serve per inviare solo una volta il file
+HASH_FILE = "over25_hash.txt"
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -35,30 +36,52 @@ def send_telegram_file(filepath, caption=""):
             print("❌ Errore invio file:", e)
 
 def partita_appena_iniziata(orario_str):
+    # Support both formats
     try:
-        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
-        match_utc = pytz.utc.localize(match_utc)
+        match_utc = parse_datetime(orario_str)
+        if match_utc is None:
+            return False
         now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
         delta = abs((match_utc - now_utc).total_seconds())
-        return delta <= 90  # entro 90 secondi dal fischio d'inizio
+        return delta <= 90
     except Exception as e:
         print("❌ Errore parsing orario:", e)
         return False
 
-def partita_tra_oggi(orario_str):
+def partita_oggi(orario_str):
     try:
-        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
-        match_utc = pytz.utc.localize(match_utc)
-        today_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
-        return match_utc.date() == today_utc.date()
+        match_utc = parse_datetime(orario_str)
+        if match_utc is None:
+            return False
+        today_utc = datetime.utcnow().date()
+        # Confronto la data UTC del match con oggi (UTC)
+        return match_utc.date() == today_utc
     except Exception as e:
-        print("❌ Errore parsing orario (tra_oggi):", e)
+        print("❌ Errore parsing orario (oggi):", e)
         return False
+
+def parse_datetime(orario_str):
+    # Prova formati: "Jun 05 2025 - 01:00AM" e "05/06/2025,01:00"
+    try:
+        # vecchio formato
+        if "-" in orario_str and ":" in orario_str and orario_str[0].isalpha():
+            return pytz.utc.localize(datetime.strptime(orario_str, "%b %d %Y - %I:%M%p"))
+        # nuovo formato: data,ora   esempio "05/06/2025,01:00"
+        elif "/" in orario_str and "," in orario_str:
+            data, ora = orario_str.split(",")
+            giorno, mese, anno = data.strip().split("/")
+            # Costruisce il datetime UTC
+            dt = datetime(int(anno), int(mese), int(giorno), int(ora.split(":")[0]), int(ora.split(":")[1]))
+            return pytz.utc.localize(dt)
+    except Exception as e:
+        print(f"❌ Errore parse_datetime: {e}")
+    return None
 
 def converti_orario_a_locale(orario_str):
     try:
-        match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
-        match_utc = pytz.utc.localize(match_utc)
+        match_utc = parse_datetime(orario_str)
+        if match_utc is None:
+            return orario_str
         match_locale = match_utc.astimezone(pytz.timezone("Europe/Rome"))
         return match_locale.strftime("%H:%M")
     except Exception as e:
@@ -75,18 +98,15 @@ def salva_notificato(match_id):
     with open(FILE_NOTIFICATI, "a") as f:
         f.write(f"{match_id}\n")
 
-def over25_file_sent_today():
-    today = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
-    if not os.path.exists(FILE_SENT_OVER25):
-        return False
-    with open(FILE_SENT_OVER25, "r") as f:
-        last_sent = f.read().strip()
-        return last_sent == today
-
-def set_over25_file_sent():
-    today = datetime.now(pytz.timezone("Europe/Rome")).strftime("%Y-%m-%d")
-    with open(FILE_SENT_OVER25, "w") as f:
-        f.write(today)
+def file_hash(filepath):
+    # Hash veloce del contenuto del file (usato per l'anti-duplicazione)
+    h = hashlib.md5()
+    with open(filepath, "rb") as f:
+        while True:
+            data = f.read(4096)
+            if not data: break
+            h.update(data)
+    return h.hexdigest()
 
 def leggi_partite(notificati):
     partite_05ht = []
@@ -105,7 +125,11 @@ def leggi_partite(notificati):
                 campionato = riga[3]
                 home = riga[4]
                 away = riga[5]
-                orario = riga[1]
+                # Formato orario adattivo
+                if len(riga) > 1 and ":" in riga[1]:
+                    orario = f"{riga[0]},{riga[1]}"
+                else:
+                    orario = riga[1]
                 over05ht = float(riga[17])
                 btts = float(riga[14])
                 over25 = float(riga[15])
@@ -116,8 +140,7 @@ def leggi_partite(notificati):
                 id_05ht = f"{base_id}-over05ht"
                 if partita_appena_iniziata(orario) and over05ht >= 85 and id_05ht not in notificati:
                     partite_05ht.append((id_05ht, nazione, campionato, home, away, orario, over05ht))
-                # Solo match di oggi per il file over 2.5
-                if partita_tra_oggi(orario) and over25 >= 85:
+                if partita_oggi(orario) and over25 >= 85:
                     partite_over25.append((nazione, campionato, home, away, orario, over25, btts))
             except Exception as e:
                 print("❌ Riga saltata:", e)
@@ -149,14 +172,24 @@ def main():
     notificati = carica_notificati()
     partite_05ht, partite_over25 = leggi_partite(notificati)
 
-    # INVIARE FILE SOLO UNA VOLTA AL GIORNO
-    if not over25_file_sent_today():
+    # File hash anti-duplicazione
+    if os.path.exists(CSV_FILE):
+        current_hash = file_hash(CSV_FILE)
+    else:
+        current_hash = ""
+
+    hash_sent = ""
+    if os.path.exists(HASH_FILE):
+        with open(HASH_FILE, "r") as f:
+            hash_sent = f.read().strip()
+
+    if partite_over25 and current_hash != hash_sent:
         filename = scrivi_txt_over25(partite_over25)
         send_telegram_file(filename, caption="📄 Over 2.5 prematch del giorno (≥85%) – APRI IL FILE")
-        set_over25_file_sent()
+        with open(HASH_FILE, "w") as f:
+            f.write(current_hash)
         os.remove(filename)  # elimina il file locale dopo invio
 
-    # Notifiche over 0.5 HT come sempre
     for match in partite_05ht:
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
