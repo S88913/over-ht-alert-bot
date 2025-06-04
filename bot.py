@@ -134,6 +134,9 @@ def main():
     notificati = carica_notificati()
     partite_05ht, partite_over25 = leggi_partite(notificati)
 
+    # Crea la cartella per il file di flag se non esiste
+    os.makedirs(os.path.dirname(f"file_sent_{DATA_OGGI}.flag"), exist_ok=True)
+
     # 1. Notifiche OVER 0.5 HT (realtime, funzionano come sempre)
     for match in partite_05ht:
         match_id, nazione, campionato, home, away, orario, over = match
@@ -150,7 +153,6 @@ def main():
         time.sleep(1.5)
 
     # 2. File OVER 2.5 inviato solo UNA volta al giorno
-    # Usa un flag temporaneo per non inviare più volte nella stessa giornata
     file_flag = f"file_sent_{DATA_OGGI}.flag"
     if not os.path.exists(file_flag):
         scrivi_file_over25(partite_over25)
