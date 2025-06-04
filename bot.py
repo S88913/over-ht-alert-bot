@@ -5,12 +5,13 @@ import time
 from datetime import datetime
 import pytz
 
-# CONFIG
+# === CONFIG ===
 BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
 CHAT_ID = "6146221712"
 FILE_NOTIFICATI = "notificati.txt"
-CSV_FILE = "matches.csv"           # <-- Nome giusto, lo carichi sempre così!
+CSV_FILE = "matches.csv"
 FILE_INVIATO = "file_inviato.txt"
+CSV_OUTPUT = "over25_today.csv"
 
 def send_telegram_document(file_path, caption=""):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
@@ -101,20 +102,16 @@ def leggi_partite(notificati):
                 continue
     return partite_05ht, partite_over25
 
-def crea_file_over25(partite_over25):
+def crea_csv_over25(partite_over25):
     today_str = datetime.now(pytz.timezone("Europe/Rome")).strftime("%d/%m/%Y")
-    file_path = "over25_output.txt"
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(f"🔥 SEGNALI OVER 2.5 DEL {today_str}\n")
-        f.write("="*32+"\n\n")
+    file_path = CSV_OUTPUT
+    with open(file_path, "w", encoding="utf-8", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["Data", "Orario", "Nazione", "Campionato", "Home", "Away", "O2.5 %", "BTTS %"])
         for match in partite_over25:
             _, nazione, campionato, home, away, orario, over25, btts = match
             orario_locale = converti_orario_a_locale(orario)
-            f.write(
-                f"{orario_locale} | {home} vs {away} ({nazione}, {campionato})\n"
-                f"   O2.5: {round(over25,1)}%   BTTS: {round(btts,1)}%\n"
-            )
-            f.write("-"*26 + "\n")
+            writer.writerow([today_str, orario_locale, nazione, campionato, home, away, round(over25,1), round(btts,1)])
     return file_path
 
 def main():
@@ -139,8 +136,8 @@ def main():
 
     # Invio file SOLO se non è stato inviato oggi
     if not file_gia_inviato() and partite_over25:
-        file_path = crea_file_over25(partite_over25)
-        send_telegram_document(file_path, caption="📄 Over 2.5 prematch del giorno (≥85%)")
+        file_path = crea_csv_over25(partite_over25)
+        send_telegram_document(file_path, caption="📄 Over 2.5 prematch del giorno (≥85%) – APRI CON GOOGLE SHEETS")
         segna_file_inviato()
     else:
         print("❗️File già inviato oggi o nessun match over2.5 trovato.")
