@@ -10,7 +10,7 @@ BOT_TOKEN = "7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI"
 CHAT_ID = "6146221712"
 FILE_NOTIFICATI = "notificati.txt"
 CSV_FILE = "matches.csv"
-CSV_OVER25 = "over25_output.csv"
+OVER25_OUTPUT = "over25_output.csv"
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -22,13 +22,22 @@ def send_telegram_message(message):
     except Exception as e:
         print("❌ Errore invio:", e)
 
+def send_telegram_document(file_path, caption=""):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    with open(file_path, 'rb') as file:
+        data = {"chat_id": CHAT_ID, "caption": caption}
+        files = {"document": file}
+        response = requests.post(url, data=data, files=files)
+        response.raise_for_status()
+        print(f"✅ File inviato su Telegram: {file_path}")
+
 def partita_appena_iniziata(orario_str):
     try:
         match_utc = datetime.strptime(orario_str, "%b %d %Y - %I:%M%p")
         match_utc = pytz.utc.localize(match_utc)
         now_utc = datetime.utcnow().replace(tzinfo=pytz.utc)
         delta = abs((match_utc - now_utc).total_seconds())
-        return delta <= 90
+        return delta <= 90  # entro 90 secondi dal fischio d'inizio
     except Exception as e:
         print("❌ Errore parsing orario:", e)
         return False
@@ -55,7 +64,7 @@ def salva_notificato(match_id):
 
 def leggi_partite(notificati):
     partite_05ht = []
-    over25_lista = []
+    partite_over25 = []
 
     if not os.path.exists(CSV_FILE):
         print("⚠️ File matches.csv non trovato.")
@@ -66,7 +75,6 @@ def leggi_partite(notificati):
         next(reader, None)
         for riga in reader:
             try:
-                data_match = riga[0]
                 nazione = riga[2]
                 campionato = riga[3]
                 home = riga[4]
@@ -75,47 +83,29 @@ def leggi_partite(notificati):
                 over05ht = float(riga[17])
                 btts = float(riga[14])
                 over25 = float(riga[15])
-                # Solo calcio
+                # Solo calcio (no Esports)
                 if "esport" in nazione.lower() or "esoccer" in campionato.lower():
                     continue
                 base_id = f"{home}_{away}_{orario}"
                 id_05ht = f"{base_id}-over05ht"
+                id_over25 = f"{base_id}-over25"
                 # Notifica Over 0.5 HT appena inizia, solo se non già notificato
                 if partita_appena_iniziata(orario) and over05ht >= 85 and id_05ht not in notificati:
                     partite_05ht.append((id_05ht, nazione, campionato, home, away, orario, over05ht))
-                # Aggiungi a lista OVER 2.5 per esportazione file, solo se over25 >=80
-                if over25 >= 80:
-                    over25_lista.append([
-                        data_match, orario, nazione, campionato, home, away, round(over25,1), round(btts,1)
-                    ])
+                # Raccogli Over 2.5 (≥85%) per file
+                if over25 >= 85:
+                    partite_over25.append((id_over25, nazione, campionato, home, away, orario, over25, btts))
             except Exception as e:
                 print("❌ Riga saltata:", e)
                 continue
-    return partite_05ht, over25_lista
-
-def salva_over25_csv(over25_lista, csv_out):
-    # Raggruppa per giorno, separa visivamente con una riga vuota
-    over25_lista.sort(key=lambda x: (x[0], x[1]))  # Ordina per data, ora
-    current_day = None
-    rows = []
-    for r in over25_lista:
-        if r[0] != current_day:
-            current_day = r[0]
-            rows.append([f"=== {current_day} ==="])
-            rows.append(['Data', 'Ora', 'Nazione', 'Campionato', 'Home', 'Away', 'O2.5%', 'BTTS%'])
-        rows.append(r)
-    with open(csv_out, "w", newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        for row in rows:
-            writer.writerow(row)
-    print(f"✅ File OVER 2.5 esportato in: {csv_out}")
+    return partite_05ht, partite_over25
 
 def main():
     print("🚀 Bot prematch attivo...")
     notificati = carica_notificati()
     partite_05ht, partite_over25 = leggi_partite(notificati)
 
-    # Notifiche SOLO Over 0.5 HT
+    # --- INVIO NOTIFICHE SOLO OVER 0.5 HT
     for match in partite_05ht:
         match_id, nazione, campionato, home, away, orario, over = match
         orario_locale = converti_orario_a_locale(orario)
@@ -130,9 +120,18 @@ def main():
         salva_notificato(match_id)
         time.sleep(1.5)
 
-    # Salva file CSV con tutti gli OVER 2.5 da consultare e giocare con calma
-    if partite_over25:
-        salva_over25_csv(partite_over25, CSV_OVER25)
+    # --- INVIO FILE CON TUTTI OVER 2.5 >=85% (solo una volta, subito dopo carico)
+    today_str = datetime.now(pytz.timezone("Europe/Rome")).strftime("%d/%m/%Y")
+    with open(OVER25_OUTPUT, "w", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Nazione", "Campionato", "Home", "Away", "Orario", "O2.5 %", "BTTS %"])
+        for match in partite_over25:
+            _, nazione, campionato, home, away, orario, over25, btts = match
+            writer.writerow([
+                nazione, campionato, home, away, converti_orario_a_locale(orario),
+                round(over25, 1), round(btts, 1)
+            ])
+    send_telegram_document(OVER25_OUTPUT, caption=f"📄 Tutte le Over 2.5 (≥85%) del {today_str}")
 
 if __name__ == "__main__":
     main()
