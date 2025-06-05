@@ -66,12 +66,9 @@ def salva_notificato(match_id):
 def leggi_partite(notificati):
     partite_05ht = []
     partite_over25 = []
-    # NIENTE MULTIPLA
-
     if not os.path.exists(CSV_FILE):
         print("⚠️ File matches.csv non trovato.")
         return [], []
-
     with open(CSV_FILE, newline='', encoding='utf-8') as file:
         reader = csv.reader(file)
         next(reader, None)
@@ -95,7 +92,7 @@ def leggi_partite(notificati):
                 if partita_appena_iniziata(orario) and over05ht >= 85 and id_05ht not in notificati:
                     partite_05ht.append((id_05ht, nazione, campionato, home, away, orario, over05ht))
                 # Notifica Over 2.5 prematch, solo se non già notificato
-                if partita_tra_poco(orario, 10) and over25 >= 80 and id_over25 not in notificati:
+                if partita_tra_poco(orario, 10) and over25 >= 85 and id_over25 not in notificati:
                     partite_over25.append((id_over25, nazione, campionato, home, away, orario, over25, btts))
             except Exception as e:
                 print("❌ Riga saltata:", e)
@@ -139,4 +136,4 @@ def main():
         time.sleep(1.5)
 
 if __name__ == "__main__":
-    main().
+    main()
