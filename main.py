@@ -25,7 +25,7 @@ CSV_GITHUB_URL = os.getenv('CSV_GITHUB_URL', 'https://raw.githubusercontent.com/
 # Parametri
 PROBABILITA_MINIMA = float(os.getenv('PROBABILITA_MINIMA', '85.0'))
 QUOTA_MINIMA_LIVE = float(os.getenv('QUOTA_MINIMA_LIVE', '2.00'))
-INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '120'))  # 2 minuti
+INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '30'))  # 30 secondi invece di 120
 INTERVALLO_CSV = int(os.getenv('INTERVALLO_CSV', '3600'))  # Ricarica CSV ogni ora
 
 BASE_URL = 'https://bet365data.p.rapidapi.com'
@@ -84,6 +84,12 @@ def carica_csv_da_github():
         # Verifica colonne disponibili
         logger.info(f"🔍 Colonne trovate: {list(df.columns)}")
         
+        # DEBUG: Mostra prime 3 righe per verifica
+        logger.info(f"📊 PRIME 3 RIGHE CSV:")
+        for idx, row in df.head(3).iterrows():
+            logger.info(f"   Riga {idx}: Home={row.get('Home Team', 'N/A')}, Away={row.get('Away Team', 'N/A')}")
+            logger.info(f"   Over05 FHG HT Average: {row.get('Over05 FHG HT Average', 'N/A')}")
+        
         # Trova la colonna corretta per Over 0.5 HT
         over_05_ht_col = None
         possibili_colonne = [
@@ -104,14 +110,37 @@ def carica_csv_da_github():
         
         logger.info(f"✅ Usando colonna: {over_05_ht_col}")
         
+        # DEBUG: Verifica valori nella colonna selezionata
+        logger.info(f"📊 SAMPLE VALORI COLONNA {over_05_ht_col}:")
+        sample_values = df[over_05_ht_col].head(10).tolist()
+        logger.info(f"   Primi 10 valori: {sample_values}")
+        
         # Converti la colonna percentuale in numerico
         df[over_05_ht_col] = pd.to_numeric(df[over_05_ht_col], errors='coerce')
         
+        # DEBUG: Verifica dopo conversione numerica
+        logger.info(f"📊 DOPO CONVERSIONE NUMERICA:")
+        sample_numeric = df[over_05_ht_col].head(10).tolist()
+        logger.info(f"   Primi 10 valori numerici: {sample_numeric}")
+        
+        # DEBUG: Mostra distribuzione valori
+        value_counts = df[over_05_ht_col].value_counts().head(10)
+        logger.info(f"📊 DISTRIBUZIONE VALORI PIÙ COMUNI:")
+        for value, count in value_counts.items():
+            logger.info(f"   Valore {value}: {count} match")
+        
         # Filtra match con probabilità >= soglia
+        logger.info(f"🎯 FILTRO: Cercando match con {over_05_ht_col} >= {PROBABILITA_MINIMA}")
         df_filtrato = df[df[over_05_ht_col] >= PROBABILITA_MINIMA].copy()
         logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}%): {len(df_filtrato)}")
         
-        # Prepara dictionary per monitoring
+        # DEBUG: Mostra i match che hanno passato il filtro
+        if len(df_filtrato) > 0:
+            logger.info(f"📋 MATCH CHE HANNO PASSATO IL FILTRO:")
+            for idx, row in df_filtrato.head(5).iterrows():
+                logger.info(f"   {row['Home Team']} vs {row['Away Team']}: {row[over_05_ht_col]}%")
+        
+        # Prepara dictionary per monitoring con DEBUG COMPLETO
         match_dict = {}
         
         for index, row in df_filtrato.iterrows():
@@ -122,9 +151,19 @@ def carica_csv_da_github():
             country = str(row['Country']).strip()
             league = str(row['League']).strip()
             
+            # DEBUG: Log dettagliato per ogni match filtrato
+            logger.info(f"🔍 MATCH FILTRATO: {home_team} vs {away_team}")
+            logger.info(f"   📊 Colonna usata: {over_05_ht_col}")
+            logger.info(f"   📈 Valore colonna: {probabilita}")
+            logger.info(f"   🗓️ Data: {data_match}")
+            logger.info(f"   🌍 Paese: {country}")
+            logger.info(f"   🏆 Lega: {league}")
+            logger.info(f"   📋 Riga CSV completa: {dict(row)}")
+            
             # Crea chiave di ricerca
             home_norm = normalizza_nome_squadra(home_team)
             away_norm = normalizza_nome_squadra(away_team)
+            match_key = f"{home_norm}_vs_{away_norm}"
             match_key = f"{home_norm}_vs_{away_norm}"
             
             match_dict[match_key] = {
@@ -175,47 +214,72 @@ def carica_csv_da_github():
         return False
 
 def normalizza_nome_squadra(nome):
-    """Normalizza il nome della squadra per il matching"""
+    """Normalizza il nome della squadra per il matching - VERSIONE RIGOROSA"""
     if not nome:
         return ""
     
     nome = str(nome).strip().lower()
     
-    # Rimuovi caratteri speciali
+    # Rimuovi caratteri speciali e normalizza
     sostituzioni = {
-        'fc': '', 'sc': '', 'ac': '', 'cf': '', 'cd': '', 'u23': '', 'u20': '', 'u21': '',
-        '.': '', '-': ' ', '_': ' ', '  ': ' '
+        '.': '', '-': ' ', '_': ' ', '  ': ' ', '\t': ' ',
+        'football club': 'fc', 'soccer club': 'sc', 'athletic club': 'ac'
     }
     
     for old, new in sostituzioni.items():
         nome = nome.replace(old, new)
     
+    # Rimuovi spazi multipli
+    nome = ' '.join(nome.split())
+    
     return nome.strip()
 
 def trova_match_in_csv(home_live, away_live):
-    """Trova un match live nel CSV caricato"""
+    """Trova un match live nel CSV caricato - MATCHING RIGOROSO"""
     home_norm = normalizza_nome_squadra(home_live)
     away_norm = normalizza_nome_squadra(away_live)
     
     # Cerca match esatto
     match_key = f"{home_norm}_vs_{away_norm}"
     if match_key in match_target:
+        logger.info(f"✅ Match esatto trovato: {home_live} vs {away_live}")
         return match_target[match_key]
     
-    # Fuzzy matching
+    # Matching rigoroso - almeno 70% di sovrapposizione
     for key, match_data in match_target.items():
-        home_similarity = max(
-            len(set(home_norm.split()) & set(match_data['home_norm'].split())),
-            1 if home_norm in match_data['home_norm'] or match_data['home_norm'] in home_norm else 0
-        )
-        away_similarity = max(
-            len(set(away_norm.split()) & set(match_data['away_norm'].split())),
-            1 if away_norm in match_data['away_norm'] or match_data['away_norm'] in away_norm else 0
-        )
+        home_csv_norm = match_data['home_norm']
+        away_csv_norm = match_data['away_norm']
         
-        if home_similarity > 0 and away_similarity > 0:
-            logger.info(f"🔍 Match trovato (fuzzy): {home_live} vs {away_live} -> {match_data['home']} vs {match_data['away']}")
+        # Calcola similarità usando parole chiave
+        home_words_live = set(home_norm.split())
+        away_words_live = set(away_norm.split())
+        home_words_csv = set(home_csv_norm.split())
+        away_words_csv = set(away_csv_norm.split())
+        
+        # Rimuovi parole comuni che causano confusione
+        common_words = {'fc', 'sc', 'ac', 'cf', 'cd', 'united', 'city', 'town', 'women', 'u23', 'u20', 'u21', 'reserves', 'ii'}
+        
+        home_words_live = home_words_live - common_words
+        away_words_live = away_words_live - common_words  
+        home_words_csv = home_words_csv - common_words
+        away_words_csv = away_words_csv - common_words
+        
+        if not home_words_live or not away_words_live or not home_words_csv or not away_words_csv:
+            continue
+            
+        # Calcola overlap percentage
+        home_overlap = len(home_words_live & home_words_csv) / max(len(home_words_live), len(home_words_csv))
+        away_overlap = len(away_words_live & away_words_csv) / max(len(away_words_live), len(away_words_csv))
+        
+        # Richiedi almeno 70% di overlap per entrambe le squadre
+        if home_overlap >= 0.7 and away_overlap >= 0.7:
+            logger.info(f"✅ Match rigoroso trovato: {home_live} vs {away_live} -> {match_data['home']} vs {match_data['away']}")
+            logger.info(f"   Overlap: Casa {home_overlap:.1%}, Trasferta {away_overlap:.1%}")
             return match_data
+        elif home_overlap >= 0.4 and away_overlap >= 0.4:
+            # Log match sospetti ma non li accetta
+            logger.warning(f"⚠️  Match sospetto (overlap basso): {home_live} vs {away_live} -> {match_data['home']} vs {match_data['away']}")
+            logger.warning(f"   Overlap: Casa {home_overlap:.1%}, Trasferta {away_overlap:.1%} - SCARTATO")
     
     return None
 
