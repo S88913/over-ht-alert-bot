@@ -77,38 +77,50 @@ def carica_csv_da_github():
         # Leggi CSV dal contenuto
         csv_content = StringIO(response.text)
         
-        # Definisci nomi colonne basandoti sulla struttura FootyStats
-        column_names = [
-            'timestamp', 'date', 'country', 'league', 'home_team', 'away_team',
-            'col6', 'col7', 'col8', 'col9', 'col10', 'col11', 'col12', 'col13', 
-            'over_05_ht_percent', 'col15', 'col16', 'col17', 'col18', 'col19',
-            'col20', 'col21', 'col22', 'col23', 'col24', 'col25', 'col26', 'col27',
-            'col28', 'col29', 'col30', 'col31', 'col32', 'col33', 'col34', 'col35',
-            'col36', 'col37', 'col38', 'col39', 'col40', 'col41', 'col42', 'col43',
-            'col44', 'col45', 'col46', 'col47', 'col48', 'col49', 'col50'
-        ]
-        
-        # Leggi CSV
-        df = pd.read_csv(csv_content, header=None, names=column_names[:50])
+        # Leggi CSV con header
+        df = pd.read_csv(csv_content)
         logger.info(f"📊 CSV scaricato: {len(df)} match totali")
         
+        # Verifica colonne disponibili
+        logger.info(f"🔍 Colonne trovate: {list(df.columns)}")
+        
+        # Trova la colonna corretta per Over 0.5 HT
+        over_05_ht_col = None
+        possibili_colonne = [
+            'Over05 FHG HT Average',
+            'Over 0.5 FHG HT Average', 
+            'over_05_ht_percent',
+            'Over05 FHG HT'
+        ]
+        
+        for col in possibili_colonne:
+            if col in df.columns:
+                over_05_ht_col = col
+                break
+        
+        if not over_05_ht_col:
+            logger.error(f"❌ Colonna Over 0.5 HT non trovata! Colonne disponibili: {list(df.columns)}")
+            return False
+        
+        logger.info(f"✅ Usando colonna: {over_05_ht_col}")
+        
         # Converti la colonna percentuale in numerico
-        df['over_05_ht_percent'] = pd.to_numeric(df['over_05_ht_percent'], errors='coerce')
+        df[over_05_ht_col] = pd.to_numeric(df[over_05_ht_col], errors='coerce')
         
         # Filtra match con probabilità >= soglia
-        df_filtrato = df[df['over_05_ht_percent'] >= PROBABILITA_MINIMA].copy()
+        df_filtrato = df[df[over_05_ht_col] >= PROBABILITA_MINIMA].copy()
         logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}%): {len(df_filtrato)}")
         
         # Prepara dictionary per monitoring
         match_dict = {}
         
         for index, row in df_filtrato.iterrows():
-            home_team = str(row['home_team']).strip()
-            away_team = str(row['away_team']).strip()
-            probabilita = row['over_05_ht_percent']
-            data_match = str(row['date']).strip()
-            country = str(row['country']).strip()
-            league = str(row['league']).strip()
+            home_team = str(row['Home Team']).strip()
+            away_team = str(row['Away Team']).strip()
+            probabilita = row[over_05_ht_col]
+            data_match = str(row['date_GMT']).strip()
+            country = str(row['Country']).strip()
+            league = str(row['League']).strip()
             
             # Crea chiave di ricerca
             home_norm = normalizza_nome_squadra(home_team)
