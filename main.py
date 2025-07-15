@@ -22,11 +22,12 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '6146221712')
 # URL del CSV su GitHub (DA CONFIGURARE)
 CSV_GITHUB_URL = os.getenv('CSV_GITHUB_URL', 'https://raw.githubusercontent.com/TUO_USERNAME/TUO_REPO/main/matches_today.csv')
 
-# Parametri
-PROBABILITA_MINIMA = float(os.getenv('PROBABILITA_MINIMA', '85.0'))
-QUOTA_MINIMA_LIVE = float(os.getenv('QUOTA_MINIMA_LIVE', '2.00'))
-INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '30'))  # 30 secondi invece di 120
-INTERVALLO_CSV = int(os.getenv('INTERVALLO_CSV', '3600'))  # Ricarica CSV ogni ora
+# Parametri OTTIMIZZATI per 500 chiamate/giorno
+PROBABILITA_MINIMA = float(os.getenv('PROBABILITA_MINIMA', '85.0'))  # RIGIDO: Solo 85%+
+QUOTA_MINIMA_LIVE = float(os.getenv('QUOTA_MINIMA_LIVE', '2.00'))   # RIGIDO: Solo 2.00+
+INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '600')) # 10 MINUTI (risparmio API)
+INTERVALLO_CSV = int(os.getenv('INTERVALLO_CSV', '7200'))            # 2 ORE (risparmio API)
+MAX_EVENTI_CONTROLLO = int(os.getenv('MAX_EVENTI_CONTROLLO', '5'))   # MAX 5 eventi per ciclo
 
 BASE_URL = 'https://bet365data.p.rapidapi.com'
 
@@ -192,18 +193,23 @@ def carica_csv_da_github():
                 logger.info(f"   {i+1}. {match['home']} vs {match['away']} ({match['probabilita']}%)")
                 logger.info(f"      🌍 {match['country']} | 🏆 {match['league']}")
         
-        # Notifica Telegram caricamento
-        msg_csv = f"""
-📊 <b>CSV AGGIORNATO!</b>
+        # Notifica Telegram caricamento SOLO AL PRIMO AVVIO
+        if ultimo_caricamento_csv == 0:  # Prima volta
+            msg_csv = f"""
+📊 <b>CSV CARICATO - SISTEMA AVVIATO!</b>
 
 ✅ Match totali: {len(df)}
 🎯 Match target (≥{PROBABILITA_MINIMA}%): {len(match_target)}
 💰 Quota minima: {QUOTA_MINIMA_LIVE}
-⏰ Caricato: {datetime.now().strftime('%H:%M:%S')}
+⏰ Controllo ogni: {INTERVALLO_CONTROLLO//60} minuti
+⚡ API: 500 chiamate/giorno
 
-🤖 <i>Monitor attivo!</i>
+🤖 <i>Monitor attivo - riceverai solo segnali!</i>
 """
-        invia_messaggio_telegram(msg_csv)
+            invia_messaggio_telegram(msg_csv)
+        else:
+            # Aggiornamenti silenziosi - NESSUN messaggio Telegram
+            logger.info(f"🔄 CSV aggiornato silenziosamente: {len(match_target)} match target")
         
         return True
         
@@ -377,17 +383,17 @@ def monitor_loop():
         logger.error("❌ Impossibile caricare CSV iniziale!")
         return
     
-    # Messaggio di avvio
+    # Messaggio di avvio UNICO
     start_msg = f"""
-🤖 <b>MONITOR CSV H24 AVVIATO!</b>
+🤖 <b>MONITOR OVER 0.5 HT AVVIATO!</b>
 
 📊 Match target: {len(match_target)}
-🎯 Probabilità min: {PROBABILITA_MINIMA}%
-💰 Quota min live: {QUOTA_MINIMA_LIVE}
-⏱️ Controllo ogni: {INTERVALLO_CONTROLLO}s
-📡 CSV da: GitHub
+🎯 Soglia: ≥{PROBABILITA_MINIMA}%
+💰 Quota min: ≥{QUOTA_MINIMA_LIVE}
+⏱️ Controllo: ogni {INTERVALLO_CONTROLLO//60} min
+⚡ Budget API: 500 chiamate/giorno
 
-🚀 <i>Sistema H24 operativo su Render!</i>
+🔕 <i>Modalità silenziosa: solo segnali opportunità!</i>
 """
     invia_messaggio_telegram(start_msg)
     
