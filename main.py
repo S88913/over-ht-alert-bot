@@ -1,61 +1,42 @@
-import requests
-import pandas as pd
-import json
-import time
-from datetime import datetime
 import os
+import pandas as pd
+import requests
+import time
 import logging
+from datetime import datetime, timedelta
 from io import StringIO
 
-# Setup logging per Render
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configurazione da variabili d'ambiente
-API_KEY = os.getenv('BET365_API_KEY', 'ef6ca400b4msh27cf7bcbe15ccdbp115debjsn05d47a0aaf0e')
+# Configurazione Telegram
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7912248885:AAFwOdg0rX3weVr6NXzW1adcUorvlRY8LyI')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '6146221712')
 
-# URL del CSV su GitHub (DA CONFIGURARE)
-CSV_GITHUB_URL = os.getenv('CSV_GITHUB_URL', 'https://raw.githubusercontent.com/TUO_USERNAME/TUO_REPO/main/matches_today.csv')
+# Parametri sistema
+PROBABILITA_MINIMA = float(os.getenv('PROBABILITA_MINIMA', '85.0'))
+CSV_GITHUB_URL = os.getenv('CSV_GITHUB_URL', 'https://raw.githubusercontent.com/S88913/over-ht-monitor/main/matches_today.csv')
+INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '300'))  # 5 minuti
+INTERVALLO_CSV = int(os.getenv('INTERVALLO_CSV', '7200'))  # 2 ore
 
-# Parametri OTTIMIZZATI per 500 chiamate/giorno
-PROBABILITA_MINIMA = float(os.getenv('PROBABILITA_MINIMA', '85.0'))  # RIGIDO: Solo 85%+
-QUOTA_MINIMA_LIVE = float(os.getenv('QUOTA_MINIMA_LIVE', '2.00'))   # RIGIDO: Solo 2.00+
-INTERVALLO_CONTROLLO = int(os.getenv('INTERVALLO_CONTROLLO', '600')) # 10 MINUTI (risparmio API)
-INTERVALLO_CSV = int(os.getenv('INTERVALLO_CSV', '7200'))            # 2 ORE (risparmio API)
-MAX_EVENTI_CONTROLLO = int(os.getenv('MAX_EVENTI_CONTROLLO', '5'))   # MAX 5 eventi per ciclo
-
-BASE_URL = 'https://bet365data.p.rapidapi.com'
-
-headers = {
-    'x-rapidapi-host': 'bet365data.p.rapidapi.com',
-    'x-rapidapi-key': API_KEY
-}
-
-# Cache globali
+# Storage globale
 match_target = {}
 match_notificati = set()
 ultimo_caricamento_csv = 0
 
 def invia_messaggio_telegram(messaggio):
-    """Invia messaggio al bot Telegram"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': messaggio,
-        'parse_mode': 'HTML',
-        'disable_web_page_preview': True
-    }
-    
+    """Invia messaggio Telegram"""
     try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': messaggio,
+            'parse_mode': 'HTML'
+        }
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            logger.info("✅ Messaggio Telegram inviato!")
+            logger.info("✅ Messaggio Telegram inviato")
             return True
         else:
             logger.error(f"❌ Errore Telegram: {response.status_code}")
@@ -64,32 +45,42 @@ def invia_messaggio_telegram(messaggio):
         logger.error(f"❌ Errore invio Telegram: {e}")
         return False
 
+def normalizza_nome_squadra(nome):
+    """Normalizza il nome della squadra per il matching"""
+    if not nome:
+        return ""
+    
+    nome = str(nome).strip().lower()
+    
+    # Rimuovi caratteri speciali e normalizza
+    sostituzioni = {
+        '.': '', '-': ' ', '_': ' ', '  ': ' ', '\t': ' ',
+        'football club': 'fc', 'soccer club': 'sc', 'athletic club': 'ac'
+    }
+    
+    for old, new in sostituzioni.items():
+        nome = nome.replace(old, new)
+    
+    nome = ' '.join(nome.split())
+    return nome.strip()
+
 def carica_csv_da_github():
-    """Carica CSV direttamente da GitHub"""
+    """Carica e processa il CSV da GitHub"""
     global match_target, ultimo_caricamento_csv
     
     try:
-        logger.info(f"📡 Scaricando CSV da GitHub: {CSV_GITHUB_URL}")
-        
-        # Scarica CSV da GitHub
+        logger.info(f"📥 Scaricando CSV da GitHub...")
         response = requests.get(CSV_GITHUB_URL, timeout=30)
-        response.raise_for_status()
         
-        # Leggi CSV dal contenuto
+        if response.status_code != 200:
+            logger.error(f"❌ Errore download CSV: {response.status_code}")
+            return False
+        
         csv_content = StringIO(response.text)
         
         # Leggi CSV con header
         df = pd.read_csv(csv_content)
         logger.info(f"📊 CSV scaricato: {len(df)} match totali")
-        
-        # Verifica colonne disponibili
-        logger.info(f"🔍 Colonne trovate: {list(df.columns)}")
-        
-        # DEBUG: Mostra prime 3 righe per verifica
-        logger.info(f"📊 PRIME 3 RIGHE CSV:")
-        for idx, row in df.head(3).iterrows():
-            logger.info(f"   Riga {idx}: Home={row.get('Home Team', 'N/A')}, Away={row.get('Away Team', 'N/A')}")
-            logger.info(f"   Over05 FHG HT Average: {row.get('Over05 FHG HT Average', 'N/A')}")
         
         # Trova la colonna corretta per Over 0.5 HT
         over_05_ht_col = None
@@ -106,76 +97,22 @@ def carica_csv_da_github():
                 break
         
         if not over_05_ht_col:
-            logger.error(f"❌ Colonna Over 0.5 HT non trovata! Colonne disponibili: {list(df.columns)}")
+            logger.error(f"❌ Colonna Over 0.5 HT non trovata!")
             return False
         
         logger.info(f"✅ Usando colonna: {over_05_ht_col}")
         
-        # DEBUG: Verifica valori nella colonna selezionata
-        logger.info(f"📊 SAMPLE VALORI COLONNA {over_05_ht_col}:")
-        sample_values = df[over_05_ht_col].head(10).tolist()
-        logger.info(f"   Primi 10 valori: {sample_values}")
-        
         # Converti la colonna percentuale in numerico
         df[over_05_ht_col] = pd.to_numeric(df[over_05_ht_col], errors='coerce')
         
-        # DEBUG: Verifica dopo conversione numerica
-        logger.info(f"📊 DOPO CONVERSIONE NUMERICA:")
-        sample_numeric = df[over_05_ht_col].head(10).tolist()
-        logger.info(f"   Primi 10 valori numerici: {sample_numeric}")
+        # Filtra match con probabilità >= soglia E ESCLUDI ESPORTS
+        df_filtrato = df[
+            (df[over_05_ht_col] >= PROBABILITA_MINIMA) & 
+            (df['Country'] != 'Esports')  # ESCLUDI MATCH ESPORTS
+        ].copy()
+        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}% + NO Esports): {len(df_filtrato)}")
         
-        # DEBUG: Mostra distribuzione valori
-        value_counts = df[over_05_ht_col].value_counts().head(10)
-        logger.info(f"📊 DISTRIBUZIONE VALORI PIÙ COMUNI:")
-        for value, count in value_counts.items():
-            logger.info(f"   Valore {value}: {count} match")
-        
-        # Filtra match con probabilità >= soglia (TEMPORANEO: senza filtro Esports)
-        df_filtrato = df[df[over_05_ht_col] >= PROBABILITA_MINIMA].copy()
-        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}%): {len(df_filtrato)}")
-        
-        # DEBUG: Mostra breakdown per paese
-        if len(df_filtrato) > 0:
-            country_counts = df_filtrato['Country'].value_counts()
-            logger.info(f"📊 BREAKDOWN PER PAESE:")
-            for country, count in country_counts.items():
-                logger.info(f"   {country}: {count} match")
-                
-        # DEBUG: Mostra nomi squadre per controllo matching
-        logger.info(f"📋 NOMI SQUADRE NEL CSV (prime 10):")
-        for idx, row in df_filtrato.head(10).iterrows():
-            home = row['Home Team']
-            away = row['Away Team']
-            country = row['Country']
-            prob = row[over_05_ht_col]
-            logger.info(f"   {country}: {home} vs {away} ({prob}%)")
-        
-        # DEBUG: Mostra i match che hanno passato il filtro
-        if len(df_filtrato) > 0:
-            logger.info(f"📋 PRIMI 10 MATCH CHE HANNO PASSATO IL FILTRO ≥{PROBABILITA_MINIMA}%:")
-            for idx, row in df_filtrato.head(10).iterrows():
-                home = row['Home Team']
-                away = row['Away Team'] 
-                prob = row[over_05_ht_col]
-                data = row['date_GMT']
-                logger.info(f"   {idx+1}. {home} vs {away}: {prob}% ({data})")
-                
-            if len(df_filtrato) > 10:
-                logger.info(f"   ... e altri {len(df_filtrato) - 10} match")
-                
-            # Mostra distribuzione per giorni
-            logger.info(f"📅 DISTRIBUZIONE PER DATA:")
-            date_counts = df_filtrato['date_GMT'].value_counts().head(5)
-            for date, count in date_counts.items():
-                logger.info(f"   {date}: {count} match")
-        else:
-            logger.warning(f"❌ NESSUN MATCH ha {over_05_ht_col} ≥ {PROBABILITA_MINIMA}%")
-            logger.info(f"📊 Valori massimi trovati:")
-            max_values = df[over_05_ht_col].nlargest(5)
-            for i, val in enumerate(max_values):
-                logger.info(f"   {i+1}. {val}%")
-        
-        # Prepara dictionary per monitoring con DEBUG COMPLETO
+        # Prepara dictionary per monitoring
         match_dict = {}
         
         for index, row in df_filtrato.iterrows():
@@ -186,19 +123,9 @@ def carica_csv_da_github():
             country = str(row['Country']).strip()
             league = str(row['League']).strip()
             
-            # DEBUG: Log dettagliato per ogni match filtrato
-            logger.info(f"🔍 MATCH FILTRATO: {home_team} vs {away_team}")
-            logger.info(f"   📊 Colonna usata: {over_05_ht_col}")
-            logger.info(f"   📈 Valore colonna: {probabilita}")
-            logger.info(f"   🗓️ Data: {data_match}")
-            logger.info(f"   🌍 Paese: {country}")
-            logger.info(f"   🏆 Lega: {league}")
-            logger.info(f"   📋 Riga CSV completa: {dict(row)}")
-            
             # Crea chiave di ricerca
             home_norm = normalizza_nome_squadra(home_team)
             away_norm = normalizza_nome_squadra(away_team)
-            match_key = f"{home_norm}_vs_{away_norm}"
             match_key = f"{home_norm}_vs_{away_norm}"
             
             match_dict[match_key] = {
@@ -209,73 +136,26 @@ def carica_csv_da_github():
                 'probabilita': probabilita,
                 'data': data_match,
                 'country': country,
-                'league': league,
-                'notificato': False
+                'league': league
             }
         
         match_target = match_dict
         ultimo_caricamento_csv = time.time()
         
-        logger.info(f"✅ {len(match_target)} match caricati per monitoring")
-        
-        # Log top matches
-        if match_target:
-            logger.info("🎯 TOP MATCH CARICATI:")
-            sorted_matches = sorted(match_target.items(), key=lambda x: x[1]['probabilita'], reverse=True)
-            
-            for i, (key, match) in enumerate(sorted_matches[:5]):
-                logger.info(f"   {i+1}. {match['home']} vs {match['away']} ({match['probabilita']}%)")
-                logger.info(f"      🌍 {match['country']} | 🏆 {match['league']}")
-        
         # Notifica Telegram caricamento SOLO AL PRIMO AVVIO
-        if ultimo_caricamento_csv == 0:  # Prima volta
-            msg_csv = f"""
-📊 <b>CSV CARICATO - SISTEMA AVVIATO!</b>
-
-✅ Match totali: {len(df)}
-🎯 Match target (≥{PROBABILITA_MINIMA}%): {len(match_target)}
-💰 Quota minima: {QUOTA_MINIMA_LIVE}
-⏰ Controllo ogni: {INTERVALLO_CONTROLLO//60} minuti
-⚡ API: 500 chiamate/giorno
-
-🤖 <i>Monitor attivo - riceverai solo segnali!</i>
-"""
-            invia_messaggio_telegram(msg_csv)
+        if len(match_target) == 0:
+            logger.warning("⚠️ Nessun match target trovato")
         else:
-            # Aggiornamenti silenziosi - NESSUN messaggio Telegram
-            logger.info(f"🔄 CSV aggiornato silenziosamente: {len(match_target)} match target")
+            logger.info(f"✅ {len(match_target)} match target caricati")
         
         return True
         
     except Exception as e:
         logger.error(f"❌ Errore caricamento CSV: {e}")
-        msg_errore = f"❌ <b>ERRORE CSV!</b>\n\n{str(e)}\n\n⏰ {datetime.now().strftime('%H:%M:%S')}"
-        invia_messaggio_telegram(msg_errore)
         return False
 
-def normalizza_nome_squadra(nome):
-    """Normalizza il nome della squadra per il matching - VERSIONE RIGOROSA"""
-    if not nome:
-        return ""
-    
-    nome = str(nome).strip().lower()
-    
-    # Rimuovi caratteri speciali e normalizza
-    sostituzioni = {
-        '.': '', '-': ' ', '_': ' ', '  ': ' ', '\t': ' ',
-        'football club': 'fc', 'soccer club': 'sc', 'athletic club': 'ac'
-    }
-    
-    for old, new in sostituzioni.items():
-        nome = nome.replace(old, new)
-    
-    # Rimuovi spazi multipli
-    nome = ' '.join(nome.split())
-    
-    return nome.strip()
-
 def trova_match_in_csv(home_live, away_live):
-    """Trova un match live nel CSV caricato - MATCHING RIGOROSO"""
+    """Trova un match live nel CSV caricato"""
     home_norm = normalizza_nome_squadra(home_live)
     away_norm = normalizza_nome_squadra(away_live)
     
@@ -314,103 +194,28 @@ def trova_match_in_csv(home_live, away_live):
         # Richiedi almeno 70% di overlap per entrambe le squadre
         if home_overlap >= 0.7 and away_overlap >= 0.7:
             logger.info(f"✅ Match rigoroso trovato: {home_live} vs {away_live} -> {match_data['home']} vs {match_data['away']}")
-            logger.info(f"   Overlap: Casa {home_overlap:.1%}, Trasferta {away_overlap:.1%}")
             return match_data
-        elif home_overlap >= 0.4 and away_overlap >= 0.4:
-            # Log match sospetti ma non li accetta
-            logger.warning(f"⚠️  Match sospetto (overlap basso): {home_live} vs {away_live} -> {match_data['home']} vs {match_data['away']}")
-            logger.warning(f"   Overlap: Casa {home_overlap:.1%}, Trasferta {away_overlap:.1%} - SCARTATO")
     
     return None
 
-def get_live_events():
-    """Ottiene eventi live"""
-    url = f"{BASE_URL}/live-events?sport=soccer"
-    
+def calcola_minuti_da_inizio(ora_inizio_str):
+    """Calcola i minuti passati dall'inizio del match"""
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 429:
-            logger.warning("⚠️ Rate limit - pausa...")
-            time.sleep(180)
-            return None
-        else:
-            logger.error(f"❌ Errore API eventi: {response.status_code}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ Errore connessione eventi: {e}")
-        return None
-
-def get_event_odds(event_id):
-    """Ottiene quote per un evento"""
-    url = f"{BASE_URL}/live-events/{event_id}"
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 429:
-            logger.warning("⚠️ Rate limit quote...")
-            time.sleep(60)
-            return None
-        else:
-            return None
-    except Exception as e:
-        logger.error(f"❌ Errore quote evento {event_id}: {e}")
-        return None
-
-def trova_over_05_ht(odds_data):
-    """Trova quote Over 0.5 HT"""
-    if not odds_data or not isinstance(odds_data, dict):
-        return None
-    
-    if 'data' not in odds_data:
-        return None
+        # Formato esempio: "Jul 16 2025 - 10:00am"
+        ora_inizio = datetime.strptime(ora_inizio_str, "%b %d %Y - %I:%M%p")
+        ora_attuale = datetime.now()
         
-    data = odds_data['data']
-    if not isinstance(data, dict) or 'mg' not in data:
-        return None
-    
-    markets = data['mg']
-    
-    for market in markets:
-        if isinstance(market, dict):
-            market_name = str(market.get('name', '')).lower()
-            
-            if '1st half goals' in market_name:
-                if 'ma' in market:
-                    odds = market['ma']
-                    
-                    for odd in odds:
-                        if isinstance(odd, dict):
-                            selection = str(odd.get('name', '')).lower()
-                            
-                            if 'over' in selection:
-                                pa_data = odd.get('pa', [])
-                                if isinstance(pa_data, list) and pa_data:
-                                    price_str = pa_data[0].get('decimal', '')
-                                    handicap = pa_data[0].get('HA', '')
-                                    fraction = pa_data[0].get('OD', '')
-                                    
-                                    try:
-                                        price = float(price_str)
-                                        
-                                        if handicap == '0.5':
-                                            return {
-                                                'quota': price,
-                                                'handicap': handicap,
-                                                'fraction': fraction
-                                            }
-                                    except:
-                                        continue
-    return None
+        # Calcola differenza in minuti
+        diff = ora_attuale - ora_inizio
+        minuti = int(diff.total_seconds() / 60)
+        
+        return minuti
+    except:
+        return 0
 
-def monitor_loop():
-    """Loop principale del monitor"""
-    global ultimo_caricamento_csv
-    
-    logger.info("🚀 MONITOR CSV H24 RENDER AVVIATO!")
+def monitor_matches():
+    """Monitor principale - versione semplificata"""
+    logger.info("🤖 MONITOR SEMPLIFICATO AVVIATO!")
     
     # Carica CSV iniziale
     if not carica_csv_da_github():
@@ -419,109 +224,70 @@ def monitor_loop():
     
     # Messaggio di avvio UNICO
     start_msg = f"""
-🤖 <b>MONITOR OVER 0.5 HT AVVIATO!</b>
+🤖 <b>MONITOR OVER 0.5 HT SEMPLIFICATO!</b>
 
 📊 Match target: {len(match_target)}
 🎯 Soglia: ≥{PROBABILITA_MINIMA}%
-💰 Quota min: ≥{QUOTA_MINIMA_LIVE}
-⏱️ Controllo: ogni {INTERVALLO_CONTROLLO//60} min
-⚡ Budget API: 500 chiamate/giorno
+⏱️ Notifica: dopo 20 minuti dall'inizio
+💰 Controllo manuale: su Bet365
 
-🔕 <i>Modalità silenziosa: solo segnali opportunità!</i>
+🔕 <i>Solo notifiche intelligenti - zero costi API!</i>
 """
     invia_messaggio_telegram(start_msg)
     
-    ciclo = 0
-    
     while True:
         try:
-            ciclo += 1
-            timestamp = datetime.now().strftime('%H:%M:%S')
+            logger.info(f"🔄 Ciclo controllo - {datetime.now().strftime('%H:%M:%S')}")
             
-            # Ricarica CSV ogni ora
+            # Ricarica CSV ogni 2 ore
             if time.time() - ultimo_caricamento_csv > INTERVALLO_CSV:
-                logger.info("🔄 Ricaricamento CSV programmato...")
+                logger.info("🔄 Ricaricamento CSV...")
                 carica_csv_da_github()
             
-            logger.info(f"🔄 Ciclo {ciclo} - {timestamp} | Target: {len(match_target)} match")
-            
-            # Ottieni eventi live
-            live_data = get_live_events()
-            if not live_data:
-                time.sleep(INTERVALLO_CONTROLLO)
-                continue
-            
-            # Controlla eventi
-            if 'data' in live_data and 'events' in live_data['data']:
-                events = live_data['data']['events']
-                logger.info(f"📋 {len(events)} eventi live totali")
+            # Controlla ogni match target per timing
+            for match_key, match_data in match_target.items():
+                data_match = match_data['data']
+                home = match_data['home']
+                away = match_data['away']
+                probabilita = match_data['probabilita']
+                country = match_data['country']
+                league = match_data['league']
                 
-                match_csv_live = 0
-                opportunita_trovate = 0
+                # Calcola minuti dall'inizio
+                minuti_passati = calcola_minuti_da_inizio(data_match)
                 
-                for event in events:
-                    home_live = event.get('home', '')
-                    away_live = event.get('away', '')
-                    event_id = event.get('id', '')
-                    live_status = event.get('live', 0)
-                    score = event.get('score', '0-0')
-                    
-                    if live_status != 1 or not event_id:
-                        continue
-                    
-                    # Controlla se match è nel CSV
-                    match_csv = trova_match_in_csv(home_live, away_live)
-                    
-                    if match_csv:
-                        match_csv_live += 1
-                        match_key = f"{event_id}_{home_live}_{away_live}"
+                # Notifica dopo 20 minuti (con tolleranza di 5 minuti)
+                if 18 <= minuti_passati <= 25:
+                    if match_key not in match_notificati:
+                        match_notificati.add(match_key)
                         
-                        logger.info(f"🎯 CSV match live: {home_live} vs {away_live} ({match_csv['probabilita']}%)")
-                        
-                        if match_key in match_notificati:
-                            continue
-                        
-                        # Ottieni quote
-                        odds_data = get_event_odds(event_id)
-                        if odds_data:
-                            over_info = trova_over_05_ht(odds_data)
-                            
-                            if over_info and over_info['quota'] >= QUOTA_MINIMA_LIVE:
-                                match_notificati.add(match_key)
-                                opportunita_trovate += 1
-                                
-                                # Notifica
-                                messaggio = f"""
-🚨 <b>MATCH CSV LIVE!</b> 🚨
+                        # Invia notifica con tutti i dettagli
+                        messaggio = f"""
+🚨 <b>SEGNALE OVER 0.5 HT!</b> 🚨
 
-⚽ <b>{home_live} vs {away_live}</b>
-🌍 {match_csv['country']} | {match_csv['league']}
-📊 Score: <b>{score}</b>
-💰 <b>Over 0.5 HT: {over_info['quota']}</b> ({over_info['fraction']})
-📈 Probabilità CSV: <b>{match_csv['probabilita']}%</b>
+⚽ <b>{home} vs {away}</b>
+🌍 {country} | {league}
+📈 <b>Probabilità CSV: {probabilita}%</b>
+⏰ <b>Minuti giocati: ~{minuti_passati}'</b>
 
-🎯 Target: ≥{QUOTA_MINIMA_LIVE}
-📅 {match_csv['data']}
-🤖 Render H24
+💡 <b>AZIONE:</b>
+1️⃣ Controlla su Bet365 se ancora 0-0
+2️⃣ Se 0-0 → Scommetti "Over 0.5 HT" 
+3️⃣ Se già gol → Passa al prossimo
+
+🎯 <i>Timing perfetto per entrare!</i>
+📅 {data_match}
 """
-                                
-                                invia_messaggio_telegram(messaggio)
-                                logger.info(f"✅ OPPORTUNITÀ: {home_live} vs {away_live} - {over_info['quota']}")
                         
-                        time.sleep(5)  # Pausa tra controlli quote
-                
-                logger.info(f"📊 Match CSV live: {match_csv_live} | Opportunità: {opportunita_trovate}")
-                
-            # Pulizia cache
-            if ciclo % 100 == 0:
-                logger.info("🧹 Pulizia cache...")
-                match_notificati.clear()
+                        invia_messaggio_telegram(messaggio)
+                        logger.info(f"🚨 SEGNALE INVIATO: {home} vs {away} ({probabilita}%) dopo {minuti_passati}'")
             
+            logger.info(f"✅ Controllo completato - prossimo in {INTERVALLO_CONTROLLO//60} minuti")
             time.sleep(INTERVALLO_CONTROLLO)
             
         except Exception as e:
-            logger.error(f"❌ Errore nel monitor: {e}")
-            time.sleep(INTERVALLO_CONTROLLO)
+            logger.error(f"❌ Errore nel loop principale: {e}")
+            time.sleep(60)  # Pausa di 1 minuto in caso di errore
 
 if __name__ == "__main__":
-    monitor_loop()
+    monitor_matches()
