@@ -130,16 +130,37 @@ def carica_csv_da_github():
         for value, count in value_counts.items():
             logger.info(f"   Valore {value}: {count} match")
         
-        # Filtra match con probabilità >= soglia
-        logger.info(f"🎯 FILTRO: Cercando match con {over_05_ht_col} >= {PROBABILITA_MINIMA}")
-        df_filtrato = df[df[over_05_ht_col] >= PROBABILITA_MINIMA].copy()
-        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}%): {len(df_filtrato)}")
+        # Filtra match con probabilità >= soglia E ESCLUDI ESPORTS
+        df_filtrato = df[
+            (df[over_05_ht_col] >= PROBABILITA_MINIMA) & 
+            (df['Country'] != 'Esports')  # ESCLUDI MATCH ESPORTS
+        ].copy()
+        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}% + NO Esports): {len(df_filtrato)}")
         
         # DEBUG: Mostra i match che hanno passato il filtro
         if len(df_filtrato) > 0:
-            logger.info(f"📋 MATCH CHE HANNO PASSATO IL FILTRO:")
-            for idx, row in df_filtrato.head(5).iterrows():
-                logger.info(f"   {row['Home Team']} vs {row['Away Team']}: {row[over_05_ht_col]}%")
+            logger.info(f"📋 PRIMI 10 MATCH CHE HANNO PASSATO IL FILTRO ≥{PROBABILITA_MINIMA}%:")
+            for idx, row in df_filtrato.head(10).iterrows():
+                home = row['Home Team']
+                away = row['Away Team'] 
+                prob = row[over_05_ht_col]
+                data = row['date_GMT']
+                logger.info(f"   {idx+1}. {home} vs {away}: {prob}% ({data})")
+                
+            if len(df_filtrato) > 10:
+                logger.info(f"   ... e altri {len(df_filtrato) - 10} match")
+                
+            # Mostra distribuzione per giorni
+            logger.info(f"📅 DISTRIBUZIONE PER DATA:")
+            date_counts = df_filtrato['date_GMT'].value_counts().head(5)
+            for date, count in date_counts.items():
+                logger.info(f"   {date}: {count} match")
+        else:
+            logger.warning(f"❌ NESSUN MATCH ha {over_05_ht_col} ≥ {PROBABILITA_MINIMA}%")
+            logger.info(f"📊 Valori massimi trovati:")
+            max_values = df[over_05_ht_col].nlargest(5)
+            for i, val in enumerate(max_values):
+                logger.info(f"   {i+1}. {val}%")
         
         # Prepara dictionary per monitoring con DEBUG COMPLETO
         match_dict = {}
