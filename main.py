@@ -130,12 +130,25 @@ def carica_csv_da_github():
         for value, count in value_counts.items():
             logger.info(f"   Valore {value}: {count} match")
         
-        # Filtra match con probabilità >= soglia E ESCLUDI ESPORTS
-        df_filtrato = df[
-            (df[over_05_ht_col] >= PROBABILITA_MINIMA) & 
-            (df['Country'] != 'Esports')  # ESCLUDI MATCH ESPORTS
-        ].copy()
-        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}% + NO Esports): {len(df_filtrato)}")
+        # Filtra match con probabilità >= soglia (TEMPORANEO: senza filtro Esports)
+        df_filtrato = df[df[over_05_ht_col] >= PROBABILITA_MINIMA].copy()
+        logger.info(f"🎯 Match filtrati (≥{PROBABILITA_MINIMA}%): {len(df_filtrato)}")
+        
+        # DEBUG: Mostra breakdown per paese
+        if len(df_filtrato) > 0:
+            country_counts = df_filtrato['Country'].value_counts()
+            logger.info(f"📊 BREAKDOWN PER PAESE:")
+            for country, count in country_counts.items():
+                logger.info(f"   {country}: {count} match")
+                
+        # DEBUG: Mostra nomi squadre per controllo matching
+        logger.info(f"📋 NOMI SQUADRE NEL CSV (prime 10):")
+        for idx, row in df_filtrato.head(10).iterrows():
+            home = row['Home Team']
+            away = row['Away Team']
+            country = row['Country']
+            prob = row[over_05_ht_col]
+            logger.info(f"   {country}: {home} vs {away} ({prob}%)")
         
         # DEBUG: Mostra i match che hanno passato il filtro
         if len(df_filtrato) > 0:
