@@ -201,16 +201,30 @@ def trova_match_in_csv(home_live, away_live):
 def calcola_minuti_da_inizio(ora_inizio_str):
     """Calcola i minuti passati dall'inizio del match"""
     try:
-        # Formato esempio: "Jul 16 2025 - 10:00am"
-        ora_inizio = datetime.strptime(ora_inizio_str, "%b %d %Y - %I:%M%p")
+        # Formato esempio: "Jul 16 2025 - 10:00am" o "Jul 16 2025 - 11:30pm"
+        logger.info(f"🕐 Parsing data: {ora_inizio_str}")
+        
+        # Parse con formato corretto
+        ora_inizio = datetime.strptime(ora_inizio_str.strip(), "%b %d %Y - %I:%M%p")
         ora_attuale = datetime.now()
+        
+        logger.info(f"🕐 Match iniziato: {ora_inizio}")
+        logger.info(f"🕐 Ora attuale: {ora_attuale}")
         
         # Calcola differenza in minuti
         diff = ora_attuale - ora_inizio
         minuti = int(diff.total_seconds() / 60)
         
+        logger.info(f"🕐 Minuti dall'inizio: {minuti}")
+        
+        # Se il match non è ancora iniziato, ritorna valore negativo
+        if minuti < 0:
+            logger.info(f"⏰ Match non ancora iniziato (inizia tra {abs(minuti)} minuti)")
+            return minuti
+            
         return minuti
-    except:
+    except Exception as e:
+        logger.error(f"❌ Errore parsing data '{ora_inizio_str}': {e}")
         return 0
 
 def monitor_matches():
@@ -245,6 +259,8 @@ def monitor_matches():
                 carica_csv_da_github()
             
             # Controlla ogni match target per timing
+            notifiche_inviate_questo_ciclo = 0
+            
             for match_key, match_data in match_target.items():
                 data_match = match_data['data']
                 home = match_data['home']
@@ -256,10 +272,13 @@ def monitor_matches():
                 # Calcola minuti dall'inizio
                 minuti_passati = calcola_minuti_da_inizio(data_match)
                 
-                # Notifica dopo 20 minuti (con tolleranza di 5 minuti)
-                if 18 <= minuti_passati <= 25:
+                logger.info(f"⚽ {home} vs {away}: {minuti_passati}' dall'inizio")
+                
+                # NOTIFICA ESATTAMENTE TRA 18-22 MINUTI (target 20')
+                if 18 <= minuti_passati <= 22:
                     if match_key not in match_notificati:
                         match_notificati.add(match_key)
+                        notifiche_inviate_questo_ciclo += 1
                         
                         # Invia notifica con tutti i dettagli
                         messaggio = f"""
@@ -276,11 +295,25 @@ def monitor_matches():
 3️⃣ Se già gol → Passa al prossimo
 
 🎯 <i>Timing perfetto per entrare!</i>
-📅 {data_match}
+📅 Match iniziato: {data_match}
+🕐 Notifica alle: {datetime.now().strftime('%H:%M')}
 """
                         
-                        invia_messaggio_telegram(messaggio)
-                        logger.info(f"🚨 SEGNALE INVIATO: {home} vs {away} ({probabilita}%) dopo {minuti_passati}'")
+                        if invia_messaggio_telegram(messaggio):
+                            logger.info(f"🚨 SEGNALE INVIATO: {home} vs {away} ({probabilita}%) dopo {minuti_passati}' minuti")
+                        else:
+                            logger.error(f"❌ Errore invio notifica per {home} vs {away}")
+                
+                # Debug: mostra status di tutti i match
+                elif minuti_passati < 0:
+                    logger.info(f"⏳ {home} vs {away}: Inizia tra {abs(minuti_passati)} minuti")
+                elif minuti_passati > 45:
+                    logger.info(f"⏹️ {home} vs {away}: Match terminato ({minuti_passati} minuti fa)")
+                else:
+                    logger.info(f"👀 {home} vs {away}: {minuti_passati}' giocati (aspetto 20')")
+            
+            if notifiche_inviate_questo_ciclo > 0:
+                logger.info(f"📱 Inviate {notifiche_inviate_questo_ciclo} notifiche in questo ciclo")
             
             logger.info(f"✅ Controllo completato - prossimo in {INTERVALLO_CONTROLLO//60} minuti")
             time.sleep(INTERVALLO_CONTROLLO)
